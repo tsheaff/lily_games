@@ -20,6 +20,7 @@ import { GameAudio } from './audio.js';
 import { Sailor } from './sailor.js';
 import { Picker, loadLook } from './picker.js';
 import { BOAT_BY_ID } from './boat.js';
+import { Studio } from './studio.js';
 
 const MOOD_PERIOD = 360;
 const CAM_DIST = 17;
@@ -32,6 +33,8 @@ renderer.setPixelRatio(pixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -45,7 +48,8 @@ const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerH
 const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
 const composer = new EffectComposer(renderer, rt);
 composer.setPixelRatio(pixelRatio);
-composer.addPass(new RenderPass(scene, camera));
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
 // One non-finite pixel (a specular highlight that overflows half-float, or a NaN) gets smeared by
 // the bloom blur into a huge box, which the canvas then shows as transparent. Scrub them first.
 composer.addPass(
@@ -93,9 +97,11 @@ const sailor = new Sailor();
 sailor.group.position.copy(SAILOR_SPOT);
 sailor.group.scale.setScalar(1.4);
 boat.group.add(sailor.group);
+const studio = new Studio(scene.environment);
 let look = loadLook();
 function applyLook(l) {
   sailor.set(l.sailor);
+  studio.sailor.set(l.sailor);
   boat.setStyle(BOAT_BY_ID[l.boat]);
 }
 applyLook(look);
@@ -244,11 +250,28 @@ rainbow.onPass = () => {
 // ---------- sailor & boat picker ----------
 const dressBtn = $('dress');
 const picker = new Picker({
-  onChange: (l) => applyLook(l),
-  onStep: () => sailor.wave(1.5),
+  onChange: (l, reaction) => {
+    applyLook(l);
+    const kid = studio.sailor;
+    if (reaction === 'surprise') {
+      kid.twirl();
+      audio.sparkle();
+      return;
+    }
+    if (reaction === 'twirl') kid.twirl();
+    else if (reaction === 'wave') kid.wave(1.5);
+    else if (reaction === 'hop') kid.hop();
+    audio.tap();
+  },
+  onStep: () => {
+    sailor.wave(1.5);
+    studio.sailor.wave(1.5);
+  },
+  onTab: (focus) => studio.setFocus(focus),
   onDone: (l) => {
     look = { ...l, saved: true };
     applyLook(look);
+    document.body.classList.remove('picking');
     if (!started) startSailing();
     else callbacks.canCollect = true;
   },
@@ -260,7 +283,28 @@ function openPicker() {
   boat.target = null;
   marker.hide();
   callbacks.canCollect = false;
+  document.body.classList.add('picking');
   picker.open(look);
+}
+
+// The closet is its own little scene; a quick curtain fade hides the switch.
+const curtain = $('curtain');
+let showStudio = false;
+let curtainBusy = false;
+function syncStage() {
+  const want = picker.isOpen && picker.step === 'sailor';
+  if (want === showStudio || curtainBusy) return;
+  curtainBusy = true;
+  curtain.classList.add('show');
+  setTimeout(() => {
+    showStudio = want;
+    renderPass.scene = want ? studio.scene : scene;
+    renderPass.camera = want ? studio.camera : camera;
+    studio.snap = true;
+    placeCamera(0, true);
+    curtain.classList.remove('show');
+    curtainBusy = false;
+  }, 300);
 }
 
 function startSailing() {
@@ -348,15 +392,26 @@ function steerToPointer(e, isTap) {
 }
 
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (!started || picker.isOpen) return;
+  if (picker.isOpen) {
+    if (showStudio) {
+      renderer.domElement.setPointerCapture(e.pointerId);
+      studio.grab(e);
+    }
+    return;
+  }
+  if (!started) return;
   pointerDown = true;
   renderer.domElement.setPointerCapture(e.pointerId);
   steerToPointer(e, true);
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
-  if (pointerDown) steerToPointer(e, false);
+  if (showStudio) studio.move(e);
+  else if (pointerDown) steerToPointer(e, false);
 });
-const release = () => (pointerDown = false);
+const release = () => {
+  pointerDown = false;
+  if (studio.release()) audio.tap();
+};
 renderer.domElement.addEventListener('pointerup', release);
 renderer.domElement.addEventListener('pointercancel', release);
 
@@ -427,16 +482,32 @@ const toWorld = (v, out) => {
 };
 const _look = new THREE.Vector3();
 
+/** The canvas size and the part of it the picker panel doesn't cover (offset so subjects center there). */
+function freeView() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  if (!picker.isOpen) return { w, h, fw: w, fh: h, ox: 0, oy: 0 };
+  const r = picker.panel.getBoundingClientRect();
+  if (r.left > w * 0.3) {
+    const fw = Math.max(200, r.left);
+    return { w, h, fw, fh: h, ox: (w - fw) / 2, oy: 0 };
+  }
+  const fh = Math.max(200, r.top);
+  return { w, h, fw: w, fh, ox: 0, oy: (h - fh) / 2 };
+}
+
 function placeCamera(dt, snap) {
   const f = boat.forward;
   const view = picker.isOpen ? PICKER_VIEWS[picker.step] : null;
   if (view) {
+    const v = freeView();
+    camera.setViewOffset(v.w, v.h, v.ox, v.oy, v.w, v.h);
     toWorld(view.cam, desiredCam);
     toWorld(view.look, _look);
-    const fit = Math.max(1, 1.25 / camera.aspect);
-    desiredCam.sub(_look).multiplyScalar(fit).add(_look);
-    _look.y -= view === PICKER_VIEWS.sailor ? 0.55 : 1.4;
+    const fit = Math.max(v.h / v.fh, (1.25 * v.h) / v.fw) * 0.9;
+    desiredCam.sub(_look).multiplyScalar(Math.max(1, fit)).add(_look);
   } else {
+    if (camera.view && camera.view.enabled) camera.clearViewOffset();
     desiredCam.set(boat.pos.x - f.x * CAM_DIST, CAM_HEIGHT + boat.y * 0.3, boat.pos.y - f.z * CAM_DIST);
     _look.set(boat.pos.x + f.x * 14, 2.5, boat.pos.y + f.z * 14);
   }
@@ -514,10 +585,13 @@ function loop() {
 
   rainbowTrail = Math.max(0, rainbowTrail - dt);
   boat.boost = 1 + 0.5 * Math.min(1, rainbowTrail / 4);
-  bloom.strength = 0.65 + rainbow.flash.value * 0.18;
+  bloom.strength = showStudio ? 0.45 : 0.65 + rainbow.flash.value * 0.18;
+  bloom.threshold = showStudio ? 2.0 : 1.3;
   rainbow.update(dt, boat, islands);
   updateSailor(dt);
   placeCamera(dt, false);
+  syncStage();
+  if (showStudio) studio.update(dt, time, freeView());
 
   ocean.follow(camera.position.x, camera.position.z);
   sky.mesh.position.copy(camera.position);
@@ -552,6 +626,11 @@ if (params.has('pick')) {
   $('start').classList.add('hidden');
   openPicker();
   if (params.get('pick') === 'boat') picker.go('boat');
+  if (params.has('tab')) {
+    picker.setTab(params.get('tab'));
+    picker.render(true);
+  }
+  if (params.has('surprise')) $('picker-random').click();
   placeCamera(0, true);
 }
 if (params.has('rainbow')) {
