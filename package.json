@@ -1,0 +1,10 @@
+{
+  "name": "lily_games",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "preview": "npm run build && npx --yes serve _site",
+    "art": "node scripts/generate-art.mjs"
+  }
+}
