@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aurora — MIDI Visualizer</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #030208; overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  body.idle-cursor { cursor: none; }
+  #hud {
+    position: fixed; left: 28px; bottom: 24px;
+    font: 300 13px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+    letter-spacing: 0.12em; text-transform: lowercase;
+    color: rgba(220, 210, 255, 0.55);
+    transition: opacity 1.6s ease; opacity: 0; pointer-events: none;
+    text-shadow: 0 0 12px rgba(150, 120, 255, 0.5);
+  }
+  #hud.show { opacity: 1; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"></div>
+<script src="main.js"></script>
+</body>
+</html>

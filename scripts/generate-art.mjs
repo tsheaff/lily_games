@@ -24,8 +24,8 @@ const ART = {
   piano_jelly: {
     aspect_ratio: '4:3',
     prompt:
-      'A colorful beach ball bobbing on sparkling Hawaiian ocean waves, a lush green volcanic island behind, a friendly little ' +
-      'octopus peeking out of the water, a small sailboat nearby, soft sunshine. ' + STYLE,
+      'A few soft glowing jellyfish drifting in a dreamy deep-violet sea, trailing swirls of colorful light, with little ' +
+      'floating music notes and tiny sparkles around them, a hint of piano keys along the bottom. ' + STYLE,
   },
   about: {
     aspect_ratio: '1:1',
