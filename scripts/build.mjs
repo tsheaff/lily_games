@@ -1,21 +1,18 @@
 // Builds the whole site into _site/: the homepage plus every game under /games/<slug>/.
 // Games with a package.json are built with Vite; anything else is copied as plain static files.
 import { execSync } from 'node:child_process';
-import { cpSync, existsSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const out = resolve(root, '_site');
-const GAMES = {
-  adventure_rainbows: 'adventure_rainbows',
-  piano_jelly: 'games/piano_jelly',
-};
+const games = readdirSync(resolve(root, 'games'), { withFileTypes: true }).filter((d) => d.isDirectory());
 
 rmSync(out, { recursive: true, force: true });
 cpSync(resolve(root, 'site'), out, { recursive: true });
 
-for (const [slug, dir] of Object.entries(GAMES)) {
-  const cwd = resolve(root, dir);
+for (const { name: slug } of games) {
+  const cwd = resolve(root, 'games', slug);
   const dest = resolve(out, 'games', slug);
   if (!existsSync(resolve(cwd, 'package.json'))) {
     cpSync(cwd, dest, { recursive: true, filter: (src) => !src.endsWith('.sh') });
