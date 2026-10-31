@@ -6,6 +6,6 @@
     "build": "node scripts/build.mjs",
     "preview": "npm run build && npx --yes serve _site",
     "art": "node scripts/generate-art.mjs",
-    "deploy": "npm run build && npx --yes wrangler pages deploy _site --project-name lilysgames --branch main"
+    "deploy": "npm run build && npx --yes wrangler pages deploy _site --project-name keikigames --branch main"
   }
 }
