@@ -11,9 +11,7 @@ When you finish a change:
 
 1. Verify it: `npm run build` must succeed, and for game changes load the game (`npx vite` in the game folder) and check it renders.
 2. Commit to `main` with a clear message.
-3. `git push origin main`. The `Deploy to keikigames.com` GitHub Action builds the site and deploys it to the Cloudflare Pages project `keikigames` (https://keikigames.com).
-4. Confirm the deploy: `gh run watch $(gh run list -L 1 --json databaseId -q '.[0].databaseId') --exit-status`, then check the changed page on https://keikigames.com.
+3. `git push origin main`. The `.githooks/pre-push` hook builds the site and deploys it to the Cloudflare Pages project `keikigames` (https://keikigames.com) using `.env`. If `git config core.hooksPath` isn't `.githooks`, run `npm run prepare` first.
+4. Confirm the push output ends with a successful wrangler deploy, then check the changed page on https://keikigames.com.
 
-If the Action is failing or unavailable, deploy manually from the repo root with `set -a && source .env && set +a && npm run deploy`.
-
-If the user says not to publish, commit on a separate branch (or leave uncommitted if asked) and do not push to `main`.
+If the user says not to publish: commit on a separate branch (or leave uncommitted if asked), or push with `SKIP_DEPLOY=1 git push`.

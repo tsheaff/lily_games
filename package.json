@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "build": "node scripts/build.mjs",
     "preview": "npm run build && npx --yes serve _site",
     "art": "node scripts/generate-art.mjs",
