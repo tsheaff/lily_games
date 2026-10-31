@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 import { mulberry32 } from './utils.js';
@@ -42,6 +43,22 @@ const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, sample
 const composer = new EffectComposer(renderer, rt);
 composer.setPixelRatio(pixelRatio);
 composer.addPass(new RenderPass(scene, camera));
+// One non-finite pixel (a specular highlight that overflows half-float, or a NaN) gets smeared by
+// the bloom blur into a huge box, which the canvas then shows as transparent. Scrub them first.
+composer.addPass(
+  new ShaderPass({
+    uniforms: { tDiffuse: { value: null } },
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: /* glsl */ `
+      uniform sampler2D tDiffuse;
+      varying vec2 vUv;
+      void main() {
+        vec3 c = texture2D(tDiffuse, vUv).rgb;
+        if (any(isnan(c))) c = vec3(0.0);
+        gl_FragColor = vec4(clamp(c, 0.0, 32.0), 1.0);
+      }`,
+  })
+);
 const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.65, 0.55, 1.3);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());

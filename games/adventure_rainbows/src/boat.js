@@ -91,7 +91,7 @@ function buildModel() {
   cabin.position.set(0, 1.1, -1.4);
   const roof = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.16, 1.2), new THREE.MeshStandardMaterial({ color: '#ff8ac4', roughness: 0.5 }));
   roof.position.set(0, 1.52, -1.4);
-  const windowMat = new THREE.MeshStandardMaterial({ color: '#7fd6ff', emissive: '#3fb0ff', emissiveIntensity: 0.4, roughness: 0.1 });
+  const windowMat = new THREE.MeshStandardMaterial({ color: '#7fd6ff', emissive: '#3fb0ff', emissiveIntensity: 0.4, roughness: 0.3 });
   for (const x of [-0.71, 0.71]) {
     const w = new THREE.Mesh(new THREE.CircleGeometry(0.17, 16), windowMat);
     w.position.set(x, 1.12, -1.4);

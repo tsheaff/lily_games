@@ -161,7 +161,8 @@ export function makePrizeModel(id) {
         new THREE.SphereGeometry(0.55, 32, 20),
         new THREE.MeshPhysicalMaterial({
           color: '#fff6fb', roughness: 0.3, metalness: 0.1, iridescence: 1, iridescenceIOR: 1.6,
-          iridescenceThicknessRange: [200, 600], emissive: '#ffe0f0', emissiveIntensity: 0.3, clearcoat: 1,
+          iridescenceThicknessMinimum: 200, iridescenceThicknessMaximum: 600,
+          emissive: '#ffe0f0', emissiveIntensity: 0.3, clearcoat: 1, clearcoatRoughness: 0.3,
         })
       );
       pearl.position.y = 0.4;
