@@ -11,16 +11,31 @@
 
     <div id="hud">
       <div id="treasures"></div>
+      <div id="rainbows"></div>
     </div>
-    <button id="mute" title="Sound on/off">🔊</button>
+    <button id="mute" class="corner" title="Sound on/off">🔊</button>
+    <button id="dress" class="corner hidden" title="Change your sailor and boat">🎨</button>
     <div id="toast"></div>
+    <div id="flash"></div>
+
+    <div id="picker" class="hidden">
+      <div class="panel">
+        <h2 id="picker-title"></h2>
+        <div id="picker-tabs"></div>
+        <div id="picker-body"></div>
+        <div class="picker-nav">
+          <button id="picker-back" class="nav">◀ Sailor</button>
+          <button id="picker-next" class="big"></button>
+        </div>
+      </div>
+    </div>
 
     <div id="start" class="overlay">
       <div class="card">
         <h1>Lily's<br /><span class="rainbow-text">Rainbow Ocean</span></h1>
         <p>Sail your boat to the islands.<br />Every island has a surprise treasure!</p>
         <button id="play" class="big">⛵ Let's Sail!</button>
-        <p class="hint">Tap the water to sail there &nbsp;·&nbsp; or use the arrow keys</p>
+        <p class="hint">Tap the water to sail there &nbsp;·&nbsp; or use the arrow keys<br />Sail through a 🌈 Double Rainbow if you can catch one!</p>
       </div>
     </div>
 

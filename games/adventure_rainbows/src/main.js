@@ -17,6 +17,9 @@ import { Boat } from './boat.js';
 import { DoubleRainbow } from './rainbow.js';
 import { Wake, Confetti, TargetMarker, makeGlowTexture } from './effects.js';
 import { GameAudio } from './audio.js';
+import { Sailor } from './sailor.js';
+import { Picker, loadLook } from './picker.js';
+import { BOAT_BY_ID } from './boat.js';
 
 const MOOD_PERIOD = 360;
 const CAM_DIST = 17;
@@ -85,6 +88,17 @@ scene.add(hemi);
 
 const boat = new Boat();
 scene.add(boat.group);
+const SAILOR_SPOT = new THREE.Vector3(0.3, 0.76, -0.35);
+const sailor = new Sailor();
+sailor.group.position.copy(SAILOR_SPOT);
+sailor.group.scale.setScalar(1.4);
+boat.group.add(sailor.group);
+let look = loadLook();
+function applyLook(l) {
+  sailor.set(l.sailor);
+  boat.setStyle(BOAT_BY_ID[l.boat]);
+}
+applyLook(look);
 const wake = new Wake(scene, shared);
 const confetti = new Confetti(scene);
 const marker = new TargetMarker(scene);
@@ -157,6 +171,7 @@ const callbacks = {
   },
   onReveal(isl, prize) {
     audio.chime();
+    sailor.wave();
     toast(`You found a ${prize.name}! ${prize.emoji}`);
     confetti.burst(_tmp.set(isl.x, isl.chestTop + 2, isl.z), 180, 1);
   },
@@ -177,6 +192,7 @@ const callbacks = {
 
 function celebrate() {
   audio.win();
+  sailor.cheer(6);
   rainbow.show();
   $('win-treasures').textContent = found.map((p) => p.emoji).join(' ');
   $('win').classList.remove('hidden');
@@ -191,15 +207,80 @@ function celebrate() {
 rainbow.onAppear = () => {
   if (!started) return;
   audio.rainbow();
-  toast('✨ Double Rainbow! ✨');
+  toast('✨ Double Rainbow! Sail through it! ✨');
 };
+
+let rainbowCount = 0;
+let rainbowTrail = 0;
+const rainbowsEl = $('rainbows');
+rainbow.onPass = () => {
+  rainbowCount++;
+  rainbowTrail = 12;
+  audio.throughRainbow();
+  sailor.cheer(4);
+  toastQueue.length = 0;
+  toast('🌈 You sailed through the Double Rainbow! 🌈');
+  rainbowsEl.textContent = `🌈 × ${rainbowCount}`;
+  rainbowsEl.classList.remove('show');
+  void rainbowsEl.offsetWidth;
+  rainbowsEl.classList.add('show');
+  const flash = $('flash');
+  flash.classList.remove('show');
+  void flash.offsetWidth;
+  flash.classList.add('show');
+  for (let i = 0; i < 6; i++) {
+    setTimeout(() => {
+      const a = Math.random() * Math.PI * 2;
+      const f = boat.forward;
+      confetti.burst(
+        _tmp.set(boat.pos.x + f.x * 9 + Math.cos(a) * 5, boat.y + 3 + Math.random() * 3, boat.pos.y + f.z * 9 + Math.sin(a) * 5),
+        120,
+        1.1
+      );
+    }, i * 220);
+  }
+};
+
+// ---------- sailor & boat picker ----------
+const dressBtn = $('dress');
+const picker = new Picker({
+  onChange: (l) => applyLook(l),
+  onStep: () => sailor.wave(1.5),
+  onDone: (l) => {
+    look = { ...l, saved: true };
+    applyLook(look);
+    if (!started) startSailing();
+    else callbacks.canCollect = true;
+  },
+});
+
+function openPicker() {
+  keys.clear();
+  pointerDown = false;
+  boat.target = null;
+  marker.hide();
+  callbacks.canCollect = false;
+  picker.open(look);
+}
+
+function startSailing() {
+  started = true;
+  callbacks.canCollect = true;
+  rainbow.enabled = true;
+  hud.classList.add('show');
+  dressBtn.classList.remove('hidden');
+}
 
 $('play').addEventListener('click', () => {
   audio.init();
-  started = true;
-  callbacks.canCollect = true;
   $('start').classList.add('hidden');
-  hud.classList.add('show');
+  if (look.saved || params.has('play')) startSailing();
+  else openPicker();
+});
+
+dressBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!picker.isOpen) openPicker();
 });
 
 $('again').addEventListener('click', () => {
@@ -219,7 +300,7 @@ muteBtn.addEventListener('click', (e) => {
 const keys = new Set();
 window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') rainbow.show();
-  if (!started) return;
+  if (!started || picker.isOpen) return;
   if (e.code.startsWith('Arrow')) e.preventDefault();
   keys.add(e.code);
 });
@@ -239,7 +320,11 @@ function steerToPointer(e, isTap) {
   let tz;
   const hits = raycaster.intersectObjects(world.pickables, true);
   const isl = hits.length ? world.islandFromObject(hits[0].object) : null;
-  if (isl) {
+  if (rainbow.visible && !rainbow.passed && raycaster.intersectObjects(rainbow.pickables).length) {
+    rainbow.throughPoint(_tmp);
+    tx = _tmp.x;
+    tz = _tmp.z;
+  } else if (isl) {
     const dx = boat.pos.x - isl.x;
     const dz = boat.pos.y - isl.z;
     const d = Math.hypot(dx, dz) || 1;
@@ -263,7 +348,7 @@ function steerToPointer(e, isTap) {
 }
 
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (!started) return;
+  if (!started || picker.isOpen) return;
   pointerDown = true;
   renderer.domElement.setPointerCapture(e.pointerId);
   steerToPointer(e, true);
@@ -329,18 +414,50 @@ function applyMood(m) {
 // ---------- camera ----------
 const lookTarget = new THREE.Vector3();
 const desiredCam = new THREE.Vector3();
+// Close-ups for the picker, in boat-local coordinates (x = port, z = bow). The look target sits
+// below the subject so it lands in the top half of the screen, above the picker panel.
+const PICKER_VIEWS = {
+  sailor: { cam: new THREE.Vector3(4.2, 3.0, 3.4), look: new THREE.Vector3(0.3, 1.75, -0.35) },
+  boat: { cam: new THREE.Vector3(6.5, 4.2, 7.5), look: new THREE.Vector3(0, 1.3, 0) },
+};
+const toWorld = (v, out) => {
+  const c = Math.cos(boat.heading);
+  const s = Math.sin(boat.heading);
+  return out.set(boat.pos.x + v.x * c + v.z * s, boat.y + v.y, boat.pos.y - v.x * s + v.z * c);
+};
+const _look = new THREE.Vector3();
+
 function placeCamera(dt, snap) {
   const f = boat.forward;
-  desiredCam.set(boat.pos.x - f.x * CAM_DIST, CAM_HEIGHT + boat.y * 0.3, boat.pos.y - f.z * CAM_DIST);
-  _tmp.set(boat.pos.x + f.x * 14, 2.5, boat.pos.y + f.z * 14);
+  const view = picker.isOpen ? PICKER_VIEWS[picker.step] : null;
+  if (view) {
+    toWorld(view.cam, desiredCam);
+    toWorld(view.look, _look);
+    const fit = Math.max(1, 1.25 / camera.aspect);
+    desiredCam.sub(_look).multiplyScalar(fit).add(_look);
+    _look.y -= view === PICKER_VIEWS.sailor ? 0.55 : 1.4;
+  } else {
+    desiredCam.set(boat.pos.x - f.x * CAM_DIST, CAM_HEIGHT + boat.y * 0.3, boat.pos.y - f.z * CAM_DIST);
+    _look.set(boat.pos.x + f.x * 14, 2.5, boat.pos.y + f.z * 14);
+  }
   if (snap) {
     camera.position.copy(desiredCam);
-    lookTarget.copy(_tmp);
+    lookTarget.copy(_look);
   } else {
-    camera.position.lerp(desiredCam, 1 - Math.exp(-2.5 * dt));
-    lookTarget.lerp(_tmp, 1 - Math.exp(-4 * dt));
+    const k = view ? 3.5 : 2.5;
+    camera.position.lerp(desiredCam, 1 - Math.exp(-k * dt));
+    lookTarget.lerp(_look, 1 - Math.exp(-(k + 1.5) * dt));
   }
   camera.lookAt(lookTarget);
+}
+
+function updateSailor(dt) {
+  let face = 0;
+  if (picker.isOpen) {
+    const v = PICKER_VIEWS[picker.step].cam;
+    face = Math.atan2(v.x - SAILOR_SPOT.x, v.z - SAILOR_SPOT.z);
+  }
+  sailor.update(dt, time, { face, look: picker.isOpen ? 0 : boat.turn * 0.5 });
 }
 
 // ---------- loop ----------
@@ -354,6 +471,7 @@ function spawnWake(dt) {
   if (speed < 1.5) return;
   wakeAcc += dt * speed * 1.8;
   const f = boat.forward;
+  const tinted = rainbowTrail > 0;
   while (wakeAcc > 1) {
     wakeAcc -= 1;
     const side = (Math.random() - 0.5) * 1.4;
@@ -362,7 +480,8 @@ function spawnWake(dt) {
       boat.pos.y - f.z * 2.4 - f.x * side,
       f.z * side * 1.5 - f.x * 0.6,
       -f.x * side * 1.5 - f.z * 0.6,
-      1.1 + Math.random() * 0.6
+      (1.1 + Math.random() * 0.6) * (tinted ? 1.3 : 1),
+      tinted ? side / 1.4 + 0.5 : -1
     );
     for (const s of [-1, 1]) {
       wake.spawn(
@@ -393,8 +512,12 @@ function loop() {
   world.update(dt, time, boat.pos, camera, callbacks);
   confetti.update(dt);
 
+  rainbowTrail = Math.max(0, rainbowTrail - dt);
+  boat.boost = 1 + 0.5 * Math.min(1, rainbowTrail / 4);
+  bloom.strength = 0.65 + rainbow.flash.value * 0.18;
+  rainbow.update(dt, boat, islands);
+  updateSailor(dt);
   placeCamera(dt, false);
-  rainbow.update(dt, camera);
 
   ocean.follow(camera.position.x, camera.position.z);
   sky.mesh.position.copy(camera.position);
@@ -425,8 +548,15 @@ if (params.has('warp')) {
     confetti.update(1 / 60);
   }
 }
+if (params.has('pick')) {
+  $('start').classList.add('hidden');
+  openPicker();
+  if (params.get('pick') === 'boat') picker.go('boat');
+  placeCamera(0, true);
+}
 if (params.has('rainbow')) {
-  rainbow.update(0, camera);
+  rainbow.show();
+  rainbow.update(0, boat, islands);
   rainbow.level = 1;
   rainbow.state = 'hold';
   rainbow.holdT = 999;

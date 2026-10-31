@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SPECTRUM_HEX } from './utils.js';
+import { SPECTRUM_HEX, SPECTRUM_GLSL } from './utils.js';
 
 export function makeGlowTexture() {
   const c = document.createElement('canvas');
@@ -30,7 +30,7 @@ void main() {
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   float tw = pow(0.5 + 0.5 * sin(uTime * (3.0 + aPhase * 4.0) + aPhase * 50.0), 2.0);
   vAlpha = tw * uOpacity;
-  gl_PointSize = aSize * uScale / -mv.z * (0.6 + 0.8 * tw);
+  gl_PointSize = min(aSize * uScale / -mv.z * (0.6 + 0.8 * tw), uScale * 0.2);
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -92,24 +92,30 @@ export function makeSparkles(shared, { count = 24, radius = 3, height = 3, size 
 const wakeVert = /* glsl */ `
 attribute float aLife;
 attribute float aSize;
+attribute float aTint;
 uniform float uScale;
 varying float vLife;
+varying float vTint;
 void main() {
   vLife = aLife;
+  vTint = aTint;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   float s = aSize * (1.0 + (1.0 - aLife) * 2.5);
-  gl_PointSize = aLife > 0.0 ? s * uScale / -mv.z : 0.0;
+  gl_PointSize = aLife > 0.0 ? min(s * uScale / -mv.z, uScale * 0.2) : 0.0;
   gl_Position = projectionMatrix * mv;
 }
 `;
 const wakeFrag = /* glsl */ `
 uniform vec3 uColor;
 varying float vLife;
+varying float vTint;
+${SPECTRUM_GLSL}
 void main() {
   float d = length(gl_PointCoord - 0.5) * 2.0;
-  float a = smoothstep(1.0, 0.25, d) * vLife * 0.6;
+  float a = smoothstep(1.0, 0.25, d) * vLife * (vTint < 0.0 ? 0.6 : 0.85);
   if (a < 0.01) discard;
-  gl_FragColor = vec4(uColor, a);
+  vec3 col = vTint < 0.0 ? uColor : spectrum(vTint) * 1.6;
+  gl_FragColor = vec4(col, a);
 }
 `;
 
@@ -121,10 +127,12 @@ export class Wake {
     this.vel = new Float32Array(count * 2);
     this.life = new Float32Array(count);
     this.size = new Float32Array(count);
+    this.tint = new Float32Array(count).fill(-1);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('aLife', new THREE.BufferAttribute(this.life, 1).setUsage(THREE.DynamicDrawUsage));
     geo.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('aTint', new THREE.BufferAttribute(this.tint, 1).setUsage(THREE.DynamicDrawUsage));
     this.geo = geo;
     this.uniforms = { uScale: shared.uScale, uColor: { value: new THREE.Color(1, 1, 1) } };
     const pts = new THREE.Points(
@@ -141,7 +149,8 @@ export class Wake {
     scene.add(pts);
   }
 
-  spawn(x, z, vx, vz, size) {
+  /** `tint` in 0..1 picks a rainbow color; negative means plain foam. */
+  spawn(x, z, vx, vz, size, tint = -1) {
     const i = this.idx++ % this.count;
     this.pos[i * 3] = x;
     this.pos[i * 3 + 2] = z;
@@ -149,6 +158,7 @@ export class Wake {
     this.vel[i * 2 + 1] = vz;
     this.life[i] = 1;
     this.size[i] = size;
+    this.tint[i] = tint;
   }
 
   update(dt, heightAt) {
@@ -165,6 +175,7 @@ export class Wake {
     this.geo.attributes.position.needsUpdate = true;
     this.geo.attributes.aLife.needsUpdate = true;
     this.geo.attributes.aSize.needsUpdate = true;
+    this.geo.attributes.aTint.needsUpdate = true;
   }
 }
 

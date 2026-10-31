@@ -140,6 +140,38 @@ export class GameAudio {
     [60, 64, 67, 71, 74, 79, 83, 86].forEach((n, i) => this.bell(mtof(n + 12), t + i * 0.14, 0.08, 2.6));
   }
 
+  throughRainbow() {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const t = this.now;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 0.8;
+    bp.frequency.setValueAtTime(400, t);
+    bp.frequency.exponentialRampToValueAtTime(6000, t + 0.9);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, t + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+    src.connect(bp);
+    bp.connect(g);
+    g.connect(this.sfx);
+    src.start(t);
+    src.stop(t + 1.3);
+    const up = [60, 62, 64, 67, 69, 72, 74, 76, 79, 81, 84, 86, 88, 91];
+    up.forEach((n, i) => this.bell(mtof(n + 12), t + i * 0.045, 0.07, 1.2));
+    [72, 76, 79, 84].forEach((n) => this.bell(mtof(n), t + 0.75, 0.12, 3.2));
+    for (let i = 0; i < 18; i++) this.bell(mtof(96 + [0, 4, 7, 12, 16][i % 5]), t + 0.9 + i * 0.06, 0.035, 0.7);
+  }
+
+  cheer() {
+    if (!this.ctx) return;
+    const t = this.now;
+    [67, 72, 76].forEach((n, i) => this.bell(mtof(n + 12), t + i * 0.08, 0.06, 0.5));
+  }
+
   win() {
     if (!this.ctx) return;
     const t = this.now;
