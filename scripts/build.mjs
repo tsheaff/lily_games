@@ -7,7 +7,6 @@ const root = resolve(import.meta.dirname, '..');
 const out = resolve(root, '_site');
 const GAMES = {
   adventure_rainbows: 'adventure_rainbows',
-  piano_jelly: 'games/piano_jelly',
 };
 
 rmSync(out, { recursive: true, force: true });
