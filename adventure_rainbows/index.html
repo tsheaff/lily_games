@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Lily's Rainbow Ocean</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud">
+      <div id="treasures"></div>
+    </div>
+    <button id="mute" title="Sound on/off">🔊</button>
+    <div id="toast"></div>
+
+    <div id="start" class="overlay">
+      <div class="card">
+        <h1>Lily's<br /><span class="rainbow-text">Rainbow Ocean</span></h1>
+        <p>Sail your boat to the islands.<br />Every island has a surprise treasure!</p>
+        <button id="play" class="big">⛵ Let's Sail!</button>
+        <p class="hint">Tap the water to sail there &nbsp;·&nbsp; or use the arrow keys</p>
+      </div>
+    </div>
+
+    <div id="win" class="overlay hidden">
+      <div class="card">
+        <h1>Hooray!</h1>
+        <p>You found <span class="rainbow-text">ALL</span> the treasures!</p>
+        <div id="win-treasures"></div>
+        <button id="again" class="big">🌈 Play Again</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
