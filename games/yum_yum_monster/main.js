@@ -1,71 +1,54 @@
-// Yum Yum Monster: a green, spiky, rainbow-tailed monster who only likes to eat.
-// He asks for a food (or later, a color), you drag or tap it into his mouth.
-// Five yummy foods fill his tummy, he burps rainbow bubbles, then gets a cake you tap to feed him.
-'use strict';
+// Yum Yum Monster: a rainbow monster who only likes to eat.
+// He never names the food; he gives a clue (a color, a shape, a kind of food, two clues, or a riddle)
+// and you drag or tap the right food into his mouth. Five foods fill his tummy, he burps rainbow
+// bubbles, and you open a present with a prize he wears. Each level brings trickier clues.
+import { COLORS, SHAPES, KINDS, FOODS, RIDDLES, RIDDLE_ALSO, PRIZES, LINES, colorShapeCombos, colorKindCombos } from './content.js';
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const muteBtn = document.getElementById('mute');
 
-const RAINBOW = ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#4dabf7', '#9775fa'];
-const C = {
-  bodyLight: '#94e68c',
-  body: '#6fd46b',
-  bodyDark: '#4cb85a',
-  belly: '#cdf6b2',
-  spike: '#3f9f5c',
-  horn: '#fff3c9',
-  hornEdge: '#e9cb82',
-  mouth: '#5b2342',
-  tongue: '#ff8fab',
-  eye: '#2d2a3e',
-};
+const RAINBOW = ['#ff5f7e', '#ff9a4d', '#ffd447', '#6bdc6b', '#4fb8ff', '#9b7bff'];
 const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
 const UI_FONT = 'Quicksand, ui-rounded, "SF Pro Rounded", system-ui, sans-serif';
-
-const FOODS = [
-  { e: '🍎', name: 'an apple', color: 'red' },
-  { e: '🍓', name: 'a strawberry', color: 'red' },
-  { e: '🍌', name: 'a banana', color: 'yellow' },
-  { e: '🧀', name: 'some cheese', color: 'yellow' },
-  { e: '🥦', name: 'some broccoli', color: 'green' },
-  { e: '🍐', name: 'a pear', color: 'green' },
-  { e: '🍇', name: 'some grapes', color: 'purple' },
-  { e: '🥕', name: 'a carrot', color: 'orange' },
-  { e: '🍊', name: 'an orange', color: 'orange' },
-  { e: '🫐', name: 'some blueberries', color: 'blue' },
-  { e: '🍩', name: 'a donut', color: 'pink' },
-  { e: '🍪', name: 'a cookie', color: null },
-  { e: '🍕', name: 'some pizza', color: null },
-  { e: '🍉', name: 'some watermelon', color: null },
-];
-const COLORS = {
-  red: '#ff4d4d',
-  yellow: '#ffd21f',
-  green: '#4cc94c',
-  purple: '#9b5cf0',
-  orange: '#ff9330',
-  blue: '#3f7dff',
-  pink: '#ff7fbf',
-};
 const TUMMY = 5;
-const BITES = 5;
-const SLOTS = 4;
-
-const ASK = ['I want {x}!', '{X}, please!', 'Can I have {x}?', 'Yummy! {X}!'];
-const YUMS = ['Yum!', 'Mmm, yummy!', 'Delicious!', 'Yum yum yum!', 'More please!', 'So tasty!'];
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, k) => a + (b - a) * k;
 const easeOutBack = (k) => 1 + 2.4 * Math.pow(k - 1, 3) + 1.4 * Math.pow(k - 1, 2);
-const cap = (s) => s[0].toUpperCase() + s.slice(1);
+const shuffle = (arr) => {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
 
-// ---------- sound ----------
+function hexRgb(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function mix(a, b, k) {
+  const x = hexRgb(a);
+  const y = hexRgb(b);
+  const c = x.map((v, i) => Math.round(lerp(v, y[i], k)));
+  return `#${((1 << 24) | (c[0] << 16) | (c[1] << 8) | c[2]).toString(16).slice(1)}`;
+}
+function bodyColorAt(t) {
+  const p = clamp(t, 0, 1) * (RAINBOW.length - 1);
+  const i = Math.min(RAINBOW.length - 2, Math.floor(p));
+  return mix(RAINBOW[i], RAINBOW[i + 1], p - i);
+}
+
+// ---------- sound effects ----------
 
 let ac = null;
 let master = null;
+let voiceOut = null;
+let analyser = null;
 let muted = false;
 
 function audio() {
@@ -74,8 +57,14 @@ function audio() {
     if (!AC) return;
     ac = new AC();
     master = ac.createGain();
-    master.gain.value = 0.55;
+    master.gain.value = 0.6;
     master.connect(ac.destination);
+    voiceOut = ac.createGain();
+    voiceOut.gain.value = 1.4;
+    analyser = ac.createAnalyser();
+    analyser.fftSize = 512;
+    voiceOut.connect(analyser);
+    analyser.connect(master);
   }
   if (ac.state === 'suspended') ac.resume();
 }
@@ -137,82 +126,119 @@ function noise({ dur, vol, freq, delay = 0 }) {
 }
 
 const sfx = {
-  pick: () => tone({ f: 600, f2: 900, dur: 0.08, vol: 0.15 }),
-  pop: () => tone({ f: 500, f2: 1100, dur: 0.08, vol: 0.12 }),
+  pick: () => tone({ f: 600, f2: 900, dur: 0.08, vol: 0.12 }),
+  pop: () => tone({ f: 500, f2: 1100, dur: 0.08, vol: 0.1 }),
   chomp: () => {
-    noise({ dur: 0.08, vol: 0.4, freq: 900 });
-    tone({ f: 190, f2: 90, dur: 0.09, vol: 0.25, type: 'triangle' });
+    noise({ dur: 0.08, vol: 0.35, freq: 900 });
+    tone({ f: 190, f2: 90, dur: 0.09, vol: 0.2, type: 'triangle' });
   },
   yum: () => {
-    tone({ f: 392, f2: 440, dur: 0.2, vol: 0.22, vib: 7 });
-    tone({ f: 523, f2: 698, dur: 0.32, vol: 0.22, delay: 0.2, vib: 7 });
+    tone({ f: 523, f2: 587, dur: 0.12, vol: 0.12, type: 'triangle' });
+    tone({ f: 784, f2: 1047, dur: 0.2, vol: 0.12, delay: 0.1, type: 'triangle' });
   },
-  no: () => {
-    tone({ f: 330, f2: 300, dur: 0.16, vol: 0.2, type: 'triangle' });
-    tone({ f: 262, f2: 220, dur: 0.26, vol: 0.2, delay: 0.2, type: 'triangle' });
-  },
+  no: () => tone({ f: 300, f2: 220, dur: 0.25, vol: 0.12, type: 'triangle' }),
   burp: () => {
-    tone({ f: 120, f2: 55, dur: 0.8, vol: 0.55, type: 'sawtooth', lp: 520, vib: 24, vibDepth: 16 });
-    noise({ dur: 0.6, vol: 0.18, freq: 300 });
+    tone({ f: 120, f2: 55, dur: 0.8, vol: 0.5, type: 'sawtooth', lp: 520, vib: 24, vibDepth: 16 });
+    noise({ dur: 0.6, vol: 0.16, freq: 300 });
   },
-  giggle: () => {
-    for (let i = 0; i < 6; i++) {
-      tone({ f: 760 + (i % 2) * 200 + i * 25, f2: 640 + i * 25, dur: 0.07, vol: 0.14, delay: i * 0.085 });
-    }
-  },
-  boing: () => tone({ f: 220, f2: 720, dur: 0.38, vol: 0.2, vib: 16, vibDepth: 50 }),
-  yawn: () => tone({ f: 300, f2: 180, dur: 0.9, vol: 0.18, type: 'triangle', vib: 5, vibDepth: 10 }),
-  tada: () => [523, 659, 784, 1047].forEach((f, i) => tone({ f, dur: 0.3, vol: 0.18, delay: i * 0.11, type: 'triangle' })),
+  boing: () => tone({ f: 220, f2: 720, dur: 0.38, vol: 0.16, vib: 16, vibDepth: 50 }),
+  shake: () => noise({ dur: 0.25, vol: 0.2, freq: 2500 }),
+  tada: () => [523, 659, 784, 1047].forEach((f, i) => tone({ f, dur: 0.3, vol: 0.15, delay: i * 0.11, type: 'triangle' })),
 };
 
-// ---------- speech ----------
+// ---------- voice (pre-recorded clips in voice/<key>.<i>.mp3) ----------
 
-let voice = null;
-let talking = false;
+const clipData = new Map();
+const clipBuffers = new Map();
+const lastIndex = {};
+let voiceSrc = null;
+let sayToken = 0;
 let lastSpoke = -99;
 
-function chooseVoice() {
-  if (!window.speechSynthesis) return;
-  const voices = speechSynthesis.getVoices().filter((v) => v.lang && v.lang.startsWith('en'));
-  voice =
-    voices.find((v) => /Samantha|Karen|Moira|Tessa/.test(v.name)) ||
-    voices.find((v) => /Google US English/.test(v.name)) ||
-    voices.find((v) => v.lang === 'en-US') ||
-    voices[0] ||
-    null;
-}
-if (window.speechSynthesis) {
-  chooseVoice();
-  speechSynthesis.addEventListener?.('voiceschanged', chooseVoice);
+function fetchClip(file) {
+  if (!clipData.has(file)) {
+    clipData.set(
+      file,
+      fetch(`voice/${file}`)
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .catch(() => null),
+    );
+  }
+  return clipData.get(file);
 }
 
-function speak(text) {
+async function clipBuffer(file) {
+  if (clipBuffers.has(file)) return clipBuffers.get(file);
+  const data = await fetchClip(file);
+  if (!data || !ac) return null;
+  const buf = await new Promise((res) => ac.decodeAudioData(data.slice(0), res, () => res(null)));
+  if (buf) clipBuffers.set(file, buf);
+  return buf;
+}
+
+function preload(keys) {
+  const files = keys.flatMap((k) => (LINES[k] || []).map((_, i) => `${k}.${i}.mp3`));
+  let i = 0;
+  const next = () => {
+    if (i < files.length) fetchClip(files[i++]).then(next);
+  };
+  for (let n = 0; n < 4; n++) next();
+}
+
+function chooseLine(key) {
+  const n = LINES[key]?.length || 0;
+  if (!n) return -1;
+  let i = Math.floor(Math.random() * n);
+  if (n > 1 && i === lastIndex[key]) i = (i + 1) % n;
+  lastIndex[key] = i;
+  return i;
+}
+
+// Plays one line for `key`, then calls `then` when he's done talking.
+function say(key, then, index = chooseLine(key)) {
+  const token = ++sayToken;
   lastSpoke = time;
-  if (muted || !window.speechSynthesis) return;
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  if (voice) u.voice = voice;
-  u.lang = 'en-US';
-  u.pitch = 1.7;
-  u.rate = 0.92;
-  u.onstart = () => (talking = true);
-  u.onend = u.onerror = () => (talking = false);
-  speechSynthesis.speak(u);
+  if (voiceSrc) {
+    try {
+      voiceSrc.stop();
+    } catch {}
+    voiceSrc = null;
+  }
+  if (index < 0) return then && after(0.5, then);
+  const text = LINES[key][index];
+  const fallbackDur = 0.4 + text.length * 0.06;
+  if (muted || !ac) return then && after(muted ? 0.6 : fallbackDur, then);
+  clipBuffer(`${key}.${index}.mp3`).then((buf) => {
+    if (token !== sayToken) return;
+    if (!buf) return then && after(0.6, then);
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    src.connect(voiceOut);
+    src.onended = () => {
+      if (voiceSrc === src) voiceSrc = null;
+      if (token === sayToken && then) then();
+    };
+    src.start();
+    voiceSrc = src;
+  });
 }
 
-function askPhrase(r) {
-  if (r.type === 'color') return `I want something ${r.color}!`;
-  const t = pick(ASK);
-  return t.replace('{x}', r.food.name).replace('{X}', cap(r.food.name));
+const ampBuf = new Float32Array(512);
+function voiceLevel() {
+  if (!analyser || !voiceSrc) return 0;
+  analyser.getFloatTimeDomainData(ampBuf);
+  let s = 0;
+  for (let i = 0; i < ampBuf.length; i++) s += ampBuf[i] * ampBuf[i];
+  return Math.sqrt(s / ampBuf.length);
 }
 
 // ---------- emoji images ----------
 
 const emojiCache = new Map();
-function emojiImg(e, px = 192) {
-  const key = e + px;
-  let c = emojiCache.get(key);
+function emojiImg(e) {
+  let c = emojiCache.get(e);
   if (!c) {
+    const px = 192;
     c = document.createElement('canvas');
     c.width = c.height = Math.ceil(px * 1.3);
     const g = c.getContext('2d');
@@ -220,7 +246,7 @@ function emojiImg(e, px = 192) {
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillText(e, c.width / 2, c.height / 2 + px * 0.06);
-    emojiCache.set(key, c);
+    emojiCache.set(e, c);
   }
   return c;
 }
@@ -235,28 +261,32 @@ function drawEmoji(e, x, y, size, rot = 0, alpha = 1) {
   ctx.restore();
 }
 
-// ---------- game state ----------
+// ---------- state ----------
 
 let W = 0;
 let H = 0;
 let DPR = 1;
 let R = 100;
-const L = {};
+const L = { slots: [] };
 let time = 0;
 
-let mode = 'sleep'; // sleep | wake | play | cake
+let mode = 'sleep'; // sleep | wake | play | present
+let level = 1;
 let tray = [];
+let leaving = [];
 let req = null;
+let lastReqKey = null;
+let wrongs = 0;
 let bubble = { s: 0, pop: 0, content: null };
 let tummy = [];
-let cakes = 0;
-let lastReqFood = null;
+let prizes = 0;
+let flyingPrize = null;
+let present = null;
 let drag = null;
 let lastActive = 0;
+let hinted = false;
 let lastPointer = null;
 let particles = [];
-let cake = null;
-let trayShow = 1;
 let tailPts = [];
 let timers = [];
 let clouds = [];
@@ -280,6 +310,7 @@ const m = {
   wag: 1,
   puff: 0,
   happy: 0,
+  talk: 0,
   chewN: 0,
 };
 
@@ -308,83 +339,172 @@ function layout() {
   canvas.height = Math.round(H * DPR);
 
   const trayH = clamp(H * 0.22, 100, 210);
-  const slotW = Math.min(W / 4.3, trayH * 1.3);
   L.trayH = trayH;
   L.trayTop = H - trayH;
   L.plateY = H - trayH * 0.5;
-  L.plateR = Math.min(slotW * 0.42, trayH * 0.36);
-  L.slots = Array.from({ length: SLOTS }, (_, i) => W / 2 + (i - (SLOTS - 1) / 2) * slotW);
+  L.plateR = Math.min((W / 5.3) * 0.42, trayH * 0.36);
 
   L.meterR = clamp(Math.min(W, H) * 0.042, 15, 30);
   L.meterY = 12 + 26 - L.meterR / 2 + L.meterR;
-  const top = L.meterY + L.meterR + 14;
+  const top = L.meterY + L.meterR + 18;
   const avail = L.trayTop - top;
-  R = Math.min(W * 0.19, avail * 0.36);
-  L.mx = W / 2 + R * 0.15;
-  L.my = top + avail * 0.56;
-  L.br = R * 0.55;
-  L.bx = Math.max(L.br + 14, L.mx - R * 1.8);
-  L.by = Math.max(top + L.br * 0.9, L.my - R * 1.05);
-
-  for (const it of tray) {
-    if (it.state === 'idle' || it.state === 'spawn') {
-      it.x = L.slots[it.slot];
-      it.y = L.plateY;
-    }
+  const portrait = H > W * 1.2;
+  if (portrait) {
+    R = Math.min(W * 0.25, avail * 0.3);
+    L.mx = W / 2 - R * 0.12;
+    L.my = top + avail * 0.6;
+    L.br = R * 0.6;
+    L.bx = Math.max(L.br + 14, L.mx - R * 0.85);
+    L.by = Math.max(top + L.br * 0.9, L.my - R * 2.2);
+  } else {
+    R = Math.min(W * 0.19, avail * 0.36);
+    L.mx = W / 2 + R * 0.15;
+    L.my = top + avail * 0.56;
+    L.br = R * 0.55;
+    L.bx = Math.max(L.br + 14, L.mx - R * 1.8);
+    L.by = Math.max(top + L.br * 0.9, L.my - R * 1.05);
   }
+  layoutSlots();
+
   if (!clouds.length) {
     clouds = Array.from({ length: 4 }, (_, i) => ({ x: rand(0, 1), y: rand(0.05, 0.35), s: rand(0.7, 1.3), v: rand(0.004, 0.01) * (i % 2 ? 1 : 0.7) }));
   }
 }
 
-// ---------- tray & requests ----------
-
-function freshFood() {
-  const inTray = new Set(tray.filter((i) => i.food && i.state !== 'gone').map((i) => i.food.e));
-  const options = FOODS.filter((f) => !inTray.has(f.e));
-  return pick(options.length ? options : FOODS);
-}
-
-function spawnItem(it, delay = 0) {
-  it.food = freshFood();
-  it.state = 'wait';
-  after(delay, () => {
-    it.state = 'spawn';
-    it.t = 0;
-    it.x = L.slots[it.slot];
-    it.y = L.plateY;
-    sfx.pop();
-  });
-}
-
-function fillTray() {
-  tray = [];
-  for (let i = 0; i < SLOTS; i++) {
-    const it = { slot: i, food: null, x: L.slots[i], y: L.plateY, state: 'wait', t: 0, s: 0, hop: 0 };
-    tray.push(it);
+function layoutSlots() {
+  const n = Math.max(3, tray.length);
+  const slotW = Math.min(W / (n + 0.3), L.trayH * 1.3);
+  L.slots = Array.from({ length: n }, (_, i) => W / 2 + (i - (n - 1) / 2) * slotW);
+  for (const it of tray) {
+    if (it.state === 'idle' || it.state === 'spawn' || it.state === 'wait') {
+      it.x = L.slots[it.slot];
+      it.y = L.plateY;
+    }
   }
-  tray.forEach((it, i) => spawnItem(it, i * 0.15));
 }
 
-function matches(food, r) {
-  if (!r) return false;
-  return r.type === 'color' ? food.color === r.color : food.e === r.food.e;
+// ---------- clues & rounds ----------
+
+function levelConfig(lv) {
+  if (lv === 1) return { plates: 3, types: ['color'] };
+  if (lv === 2) return { plates: 4, types: ['color', 'shape', 'kind', 'shape', 'kind'] };
+  if (lv === 3) return { plates: 4, types: ['cs', 'ck', 'cs', 'ck', 'shape', 'kind'] };
+  if (lv === 4) return { plates: 4, types: ['riddle', 'riddle', 'riddle', 'cs', 'ck'] };
+  return { plates: 5, types: ['riddle', 'riddle', 'cs', 'ck', 'two', 'two', 'shape', 'kind'] };
 }
 
-function nextRequest() {
+const byId = Object.fromEntries(FOODS.map((f) => [f.id, f]));
+
+function makeRequest(type) {
+  switch (type) {
+    case 'color': {
+      const c = pick(Object.keys(COLORS));
+      return { type, color: c, key: `ask.color.${c}`, test: (f) => f.color === c, fair: (f) => f.color !== null };
+    }
+    case 'shape': {
+      const s = pick(Object.keys(SHAPES));
+      return { type, shape: s, key: `ask.shape.${s}`, test: (f) => f.shape === s, fair: (f) => f.shape !== null };
+    }
+    case 'kind': {
+      const k = pick(Object.keys(KINDS));
+      return { type, kind: k, key: `ask.kind.${k}`, test: (f) => f.kind === k, fair: (f) => f.kind !== null };
+    }
+    case 'cs': {
+      const [c, s] = pick(colorShapeCombos());
+      return {
+        type, color: c, shape: s, key: `ask.cs.${c}.${s}`,
+        test: (f) => f.color === c && f.shape === s,
+        fair: (f) => f.color !== null && f.shape !== null,
+        near: (f) => f.color === c || f.shape === s,
+      };
+    }
+    case 'ck': {
+      const [c, k] = pick(colorKindCombos());
+      return {
+        type, color: c, kind: k, key: `ask.ck.${c}.${k}`,
+        test: (f) => f.color === c && f.kind === k,
+        fair: (f) => f.color !== null && f.kind !== null,
+        near: (f) => f.color === c || f.kind === k,
+      };
+    }
+    case 'riddle': {
+      const id = pick(Object.keys(RIDDLES).filter((r) => FOODS.some((f) => f.riddles.includes(r))));
+      const also = RIDDLE_ALSO[id] || [];
+      const targets = FOODS.filter((f) => f.riddles.includes(id));
+      const kinds = new Set(targets.map((f) => f.kind));
+      return {
+        type, riddle: id, key: `riddle.${id}`,
+        test: (f) => f.riddles.includes(id),
+        fair: (f) => !also.includes(f.id) && !(f.kind && kinds.has(f.kind) && Math.random() < 0.5),
+      };
+    }
+    case 'two': {
+      const base = pick(['color', 'shape', 'kind']);
+      for (let tries = 0; tries < 20; tries++) {
+        const r = makeRequest(base);
+        if (FOODS.filter(r.test).length >= 2) {
+          const v = r.color || r.shape || r.kind;
+          return { ...r, type: 'two', base, count: 2, key: `two.${base}.${v}` };
+        }
+      }
+      return makeRequest('color');
+    }
+  }
+}
+
+function newRequest() {
+  const cfg = levelConfig(level);
+  for (let tries = 0; tries < 30; tries++) {
+    const r = makeRequest(pick(cfg.types));
+    if (r.key === lastReqKey || !LINES[r.key]) continue;
+    const matches = FOODS.filter(r.test);
+    const count = r.count || 1;
+    if (matches.length < count) continue;
+    const right = shuffle(matches).slice(0, count);
+    const wrongPool = shuffle(FOODS.filter((f) => !r.test(f) && r.fair(f)));
+    const near = r.near ? wrongPool.filter(r.near).slice(0, 2) : [];
+    const wrong = [...near, ...wrongPool.filter((f) => !near.includes(f))].slice(0, cfg.plates - count);
+    if (wrong.length < 2) continue;
+    r.count = count;
+    r.left = count;
+    r.foods = shuffle([...right, ...wrong]);
+    return r;
+  }
+  return null;
+}
+
+function newRound() {
   if (mode !== 'play') return;
-  const ready = tray.filter((i) => i.food && i.state !== 'gone');
-  if (!ready.length) return after(0.3, nextRequest);
-  let choices = ready.filter((i) => i.food.e !== lastReqFood);
-  if (!choices.length) choices = ready;
-  const target = pick(choices).food;
-  lastReqFood = target.e;
-  const colorRound = cakes > 0 && target.color && Math.random() < 0.5;
-  req = colorRound ? { type: 'color', color: target.color } : { type: 'food', food: target };
-  bubble.content = req;
+  const r = newRequest();
+  if (!r) return after(0.2, newRound);
+  for (const it of tray) {
+    if (it.state !== 'gone') leaving.push({ ...it, state: 'leave', t: 0 });
+  }
+  tray = r.foods.map((food, slot) => ({ food, slot, x: 0, y: 0, s: 0, state: 'wait', t: 0, hop: 0, hint: false }));
+  layoutSlots();
+  tray.forEach((it, i) =>
+    after(0.25 + i * 0.12, () => {
+      it.state = 'spawn';
+      it.t = 0;
+      sfx.pop();
+    }),
+  );
+  req = r;
+  lastReqKey = r.key;
+  wrongs = 0;
+  hinted = false;
+  bubble.content = r;
   bubble.pop = 1;
   lastActive = time;
-  speak(askPhrase(req));
+  r.line = chooseLine(r.key);
+  fetchClip(`${r.key}.${r.line}.mp3`);
+  after(0.5, () => askAgain());
+}
+
+function askAgain() {
+  if (!req || mode !== 'play') return;
+  bubble.pop = 1;
+  say(req.key, null, req.line);
 }
 
 function canFeed() {
@@ -392,135 +512,146 @@ function canFeed() {
 }
 
 function arrive(it) {
-  if (!canFeedArrived()) {
+  if (!(mode === 'play' && req && m.state === 'idle')) {
     it.state = 'return';
     return;
   }
-  if (matches(it.food, req)) eat(it);
+  if (req.test(it.food)) eat(it);
   else reject(it);
-}
-
-function canFeedArrived() {
-  return mode === 'play' && req && m.state === 'idle';
 }
 
 function eat(it) {
   it.state = 'gone';
   const food = it.food;
-  req = null;
+  req.left--;
+  const done = req.left <= 0;
+  for (const t of tray) t.hint = false;
   setState('chew', 0.85);
   after(0.85, () => {
     setState('happy', 1.3);
     tummy.push({ food, born: time });
     sfx.yum();
-    speak(pick(YUMS));
+    const full = tummy.length >= TUMMY;
     const mp = mouthPos();
     for (let i = 0; i < 10; i++) burst('heart', mp.x, mp.y - R * 0.2, pick(['#ff7fa8', '#ff9fc0', '#ffb3d1']));
     for (let i = 0; i < 8; i++) burst('spark', mp.x, mp.y - R * 0.2, pick(RAINBOW));
+    if (full) {
+      req = null;
+      say('yum', () => after(0.2, burp));
+    } else if (done) {
+      req = null;
+      say('yum', () => after(0.3, newRound));
+    } else {
+      say('onemore', () => (lastActive = time));
+    }
   });
-  after(1.3, () => spawnItem(it));
-  after(2.15, () => (tummy.length >= TUMMY ? burp() : nextRequest()));
 }
 
 function reject(it) {
   it.state = 'return';
   it.hop = 1;
   it.t = 0;
+  wrongs++;
   setState('no', 1.0);
   sfx.no();
-  const r = req;
-  speak(`No no! ${r.type === 'color' ? `Something ${r.color}!` : cap(r.food.name) + '!'}`);
   bubble.pop = 1;
+  say('no', () => {
+    if (!req) return;
+    if (wrongs >= 2) showHint();
+    after(0.25, askAgain);
+  });
+}
+
+function showHint() {
+  hinted = true;
+  for (const t of tray) t.hint = t.state === 'idle' && req.test(t.food);
 }
 
 function burp() {
   setState('burp', 1.9);
   after(0.45, () => sfx.burp());
   after(1.25, () => {
-    for (const t of tummy) burst('spark', L.meterX(tummy.indexOf(t)), L.meterY, pick(RAINBOW));
-    tummy = [];
-    speak('Excuse me! Hee hee!');
-  });
-  after(2.3, startCake);
-}
-
-// ---------- cake ----------
-
-function startCake() {
-  mode = 'cake';
-  const c = document.createElement('canvas');
-  c.width = c.height = 512;
-  const g = c.getContext('2d');
-  g.font = `420px ${EMOJI_FONT}`;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText('🎂', 256, 280);
-  cake = { canvas: c, bites: 0, hop: -1, pop: 0, bitten: false };
-  bubble.content = { type: 'cake' };
-  bubble.pop = 1;
-  sfx.tada();
-  speak('Cake! Tap tap tap!');
-}
-
-function cakePos() {
-  return { x: W / 2, y: L.plateY - L.plateR * 0.25, size: Math.min(L.plateR * 2.7, L.trayH * 1.1) };
-}
-
-function biteCake() {
-  if (!cake || cake.hop >= 0 || cake.bites >= BITES || m.state !== 'idle') return;
-  cake.hop = 0;
-  cake.bitten = false;
-  setState('chomp', 0.55);
-}
-
-function cutCake() {
-  cake.bites++;
-  const g = cake.canvas.getContext('2d');
-  g.globalCompositeOperation = 'destination-out';
-  if (cake.bites >= BITES) {
-    g.clearRect(0, 0, 512, 512);
-  } else {
-    const x0 = 512 * (1 - cake.bites / BITES) + 20;
-    g.fillRect(x0, 0, 512, 512);
-    for (let y = 30; y < 512; y += 70) {
-      g.beginPath();
-      g.arc(x0 + rand(-6, 6), y + rand(-10, 10), rand(34, 46), 0, Math.PI * 2);
-      g.fill();
-    }
-  }
-  sfx.chomp();
-  const mp = mouthPos();
-  for (let i = 0; i < 10; i++) burst('crumb', mp.x, mp.y, pick(['#f7d9a8', '#ffffff', '#ff9fc0', '#c98b5a']));
-  if (cake.bites >= BITES) after(0.5, finishCake);
-}
-
-function finishCake() {
-  cake = null;
-  cakes++;
-  setState('dance', 2.6);
-  sfx.tada();
-  sfx.giggle();
-  speak('Yummy yummy! Thank you!');
-  for (let i = 0; i < 80; i++) {
-    particles.push({
-      type: 'confetti',
-      x: rand(0, W),
-      y: rand(-H * 0.3, 0),
-      vx: rand(-30, 30),
-      vy: rand(60, 160),
-      life: 0,
-      max: rand(2.5, 4),
-      size: rand(6, 11),
-      rot: rand(0, 6),
-      vr: rand(-6, 6),
-      color: pick(RAINBOW),
+    tummy.forEach((_, i) => {
+      for (let k = 0; k < 4; k++) burst('spark', meterX(i), L.meterY, pick(RAINBOW));
     });
-  }
-  after(2.7, () => {
-    mode = 'play';
-    fillTray();
-    after(1.0, nextRequest);
+    tummy = [];
   });
+  after(1.6, () => say('burp', () => after(0.2, startPresent)));
+}
+
+// ---------- present & prizes ----------
+
+function startPresent() {
+  mode = 'present';
+  for (const it of tray) if (it.state !== 'gone') leaving.push({ ...it, state: 'leave', t: 0 });
+  tray = [];
+  present = { t: 0, open: -1, shakes: 0 };
+  sfx.tada();
+  say('present');
+}
+
+function presentPos() {
+  return { x: W / 2, y: L.plateY - L.trayH * 0.08, size: Math.min(L.trayH * 0.95, W * 0.3) };
+}
+
+function openPresent() {
+  if (!present || present.open >= 0) return;
+  present.open = 0;
+  sfx.shake();
+  after(0.45, () => {
+    const p = presentPos();
+    sfx.tada();
+    for (let i = 0; i < 90; i++) {
+      const a = rand(-Math.PI, 0);
+      const sp = rand(200, 520);
+      particles.push({
+        type: 'confetti', x: p.x, y: p.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 0, max: rand(2, 3.4), size: rand(7, 12), rot: rand(0, 6), vr: rand(-8, 8), color: pick(RAINBOW),
+      });
+    }
+    const prize = PRIZES[prizes];
+    if (prize) {
+      flyingPrize = { e: prize.e, index: prizes, t: 0, x0: p.x, y0: p.y };
+      say(prize.key);
+    } else {
+      say('prize.more');
+    }
+    setState('dance', 2.6);
+  });
+  after(3.4, () => {
+    if (flyingPrize) prizes = Math.max(prizes, flyingPrize.index + 1);
+    flyingPrize = null;
+    present = null;
+    level++;
+    mode = 'play';
+    const intro = `level.${Math.min(level, 5)}`;
+    if (level <= 5) say(intro, () => after(0.3, newRound));
+    else after(0.3, newRound);
+    preloadLevel();
+  });
+}
+
+// Where each prize sits, in the monster's own coordinates (multiples of R).
+const PRIZE_SPOTS = [
+  { x: -0.62, y: -0.8, s: 0.42, r: -0.35 },
+  { x: 0, y: -1.17, s: 0.56, r: 0 },
+  { x: 0.62, y: -0.8, s: 0.38, r: 0.3 },
+  null,
+  null,
+  { x: 0, y: 0.55, s: 0.34, r: 0 },
+];
+
+function preloadLevel() {
+  const cfg = levelConfig(level);
+  const keys = Object.keys(LINES).filter((k) => {
+    const t = k.split('.')[0];
+    if (t === 'riddle') return cfg.types.includes('riddle');
+    if (t === 'two') return cfg.types.includes('two');
+    if (t !== 'ask') return false;
+    const sub = k.split('.')[1];
+    return cfg.types.includes(sub);
+  });
+  preload(keys);
 }
 
 // ---------- particles ----------
@@ -529,9 +660,7 @@ function burst(type, x, y, color) {
   const a = rand(0, Math.PI * 2);
   const sp = type === 'crumb' ? rand(60, 200) : rand(40, 160);
   particles.push({
-    type,
-    x,
-    y,
+    type, x, y,
     vx: Math.cos(a) * sp,
     vy: Math.sin(a) * sp - (type === 'heart' ? 80 : 40),
     life: 0,
@@ -551,6 +680,9 @@ function updateParticles(dt) {
     p.rot += p.vr * dt;
     if (p.type === 'crumb') p.vy += 600 * dt;
     else if (p.type === 'confetti') {
+      p.vy += 300 * dt;
+      p.vx *= 1 - dt * 1.5;
+      p.vy = Math.min(p.vy, 140);
       p.vx += Math.sin(p.life * 3 + p.size) * 40 * dt;
     } else if (p.type === 'bubble') {
       p.vx *= 1 - dt * 1.2;
@@ -563,15 +695,12 @@ function updateParticles(dt) {
       p.vy = p.vy * (1 - dt * 2) - 20 * dt;
     }
   }
-  const before = particles.length;
   particles = particles.filter((p) => {
     if (p.life < p.max) return true;
-    if (p.type === 'bubble') {
-      for (let i = 0; i < 4; i++) burst('spark', p.x, p.y, p.color);
-    }
+    if (p.type === 'bubble') for (let i = 0; i < 4; i++) burst('spark', p.x, p.y, p.color);
     return false;
   });
-  if (particles.length < before && particles.length > 400) particles.splice(0, particles.length - 400);
+  if (particles.length > 500) particles.splice(0, particles.length - 500);
 }
 
 function heartPath(s) {
@@ -649,13 +778,14 @@ function update(dt) {
   m.t += dt;
   if (m.dur && m.t >= m.dur) setState('idle');
 
-  // Tray items
   const mp = mouthPos();
   for (const it of tray) {
     it.t += dt;
     const sx = L.slots[it.slot];
     const sy = L.plateY;
     if (it.state === 'spawn') {
+      it.x = sx;
+      it.y = sy;
       it.s = easeOutBack(clamp(it.t / 0.45, 0, 1));
       if (it.t > 0.45) it.state = 'idle';
     } else if (it.state === 'idle') {
@@ -682,21 +812,30 @@ function update(dt) {
       }
     }
   }
+  for (const it of leaving) {
+    it.t += dt;
+    it.s = Math.max(0, 1 - it.t / 0.25);
+  }
+  leaving = leaving.filter((it) => it.t < 0.25);
 
-  const want = mode === 'cake' || mode === 'play' ? 1 : 0;
-  trayShow += ((mode === 'cake' ? 0 : want) - trayShow) * Math.min(1, dt * 6);
-  bubble.s += ((req && mode === 'play') || mode === 'cake' ? 1 - bubble.s : -bubble.s) * Math.min(1, dt * 10);
+  bubble.s += ((req && mode === 'play') || present ? 1 - bubble.s : -bubble.s) * Math.min(1, dt * 10);
   bubble.pop = Math.max(0, bubble.pop - dt * 3);
+  if (present) {
+    bubble.content = { type: 'present' };
+    present.t += dt;
+    if (present.open >= 0) present.open += dt;
+  }
+  if (flyingPrize) flyingPrize.t += dt;
 
-  if (cake) {
-    cake.pop = Math.min(1, cake.pop + dt * 2.5);
-    if (cake.hop >= 0) {
-      cake.hop += dt / 0.55;
-      if (cake.hop >= 0.5 && !cake.bitten) {
-        cake.bitten = true;
-        cutCake();
-      }
-      if (cake.hop >= 1) cake.hop = -1;
+  // Gentle nudges when she's been waiting a while.
+  if (mode === 'play' && req && m.state === 'idle' && !drag && !voiceSrc) {
+    const idle = time - lastActive;
+    if (idle > 8 && !hinted) {
+      showHint();
+      say('hint');
+    } else if (idle > 14 && time - lastSpoke > 10) {
+      if (Math.random() < 0.5) say('waiting', () => after(0.2, askAgain));
+      else askAgain();
     }
   }
 
@@ -735,7 +874,6 @@ function updateMonster(dt) {
     case 'wake':
       tSy = 1 + Math.sin(k * Math.PI) * 0.16;
       tSx = 1 - Math.sin(k * Math.PI) * 0.08;
-      tMouth = k < 0.65 ? Math.sin((k / 0.65) * Math.PI) * 0.9 : 0;
       arm = Math.sin(k * Math.PI);
       break;
     case 'idle': {
@@ -745,11 +883,7 @@ function updateMonster(dt) {
         tMouth = near.state === 'fly' ? 1 : clamp(1.15 - d / (R * 2.2), 0, 1);
         arm = tMouth * 0.4;
       }
-      if (mode === 'cake') {
-        tMouth = Math.max(tMouth, 0.25 + 0.1 * Math.sin(time * 5));
-        arm = 0.3 + 0.2 * Math.sin(time * 4);
-      }
-      if (talking) tMouth = Math.max(tMouth, 0.12 + 0.28 * Math.abs(Math.sin(time * 12)));
+      if (present) arm = 0.5 + 0.3 * Math.sin(time * 6);
       break;
     }
     case 'chew': {
@@ -763,7 +897,7 @@ function updateMonster(dt) {
         m.chewN = n;
         sfx.chomp();
         const food = tray.find((i) => i.state === 'gone')?.food;
-        const col = food ? COLORS[food.color] || '#e0b080' : '#e0b080';
+        const col = food?.color ? COLORS[food.color] : '#e0b080';
         for (let i = 0; i < 5; i++) burst('crumb', mp.x + rand(-R * 0.2, R * 0.2), mp.y, col);
       }
       break;
@@ -775,7 +909,6 @@ function updateMonster(dt) {
       tSx = 1 - hop * 0.05;
       arm = 1;
       happy = 1;
-      tMouth = 0.45;
       break;
     }
     case 'no':
@@ -786,7 +919,6 @@ function updateMonster(dt) {
       rot = Math.sin(m.t * 32) * 0.07 * (1 - k);
       tSy = 1 + 0.03 * Math.sin(m.t * 30);
       happy = 1;
-      tMouth = 0.5;
       arm = 0.7;
       break;
     case 'burp':
@@ -801,28 +933,14 @@ function updateMonster(dt) {
         tSy = 0.95;
         if (Math.random() < dt * 30) {
           particles.push({
-            type: 'bubble',
-            x: mp.x + rand(-R * 0.1, R * 0.1),
-            y: mp.y,
-            vx: rand(-160, 160),
-            vy: rand(-220, -90),
-            life: 0,
-            max: rand(1.4, 2.4),
-            size: R * rand(0.1, 0.22),
-            rot: 0,
-            vr: 0,
-            color: pick(RAINBOW),
+            type: 'bubble', x: mp.x + rand(-R * 0.1, R * 0.1), y: mp.y,
+            vx: rand(-160, 160), vy: rand(-220, -90), life: 0, max: rand(1.4, 2.4),
+            size: R * rand(0.1, 0.22), rot: 0, vr: 0, color: pick(RAINBOW),
           });
         }
       } else {
         happy = 1;
-        tMouth = 0.4;
       }
-      break;
-    case 'chomp':
-      tMouth = k < 0.45 ? 1 : 0.15;
-      puff = k > 0.5 ? 1 : 0;
-      arm = 0.6;
       break;
     case 'dance': {
       const b = m.t * Math.PI * 2.2;
@@ -830,13 +948,17 @@ function updateMonster(dt) {
       rot = Math.sin(b * 0.5) * 0.15;
       arm = 0.5 + 0.5 * Math.sin(b);
       happy = 1;
-      tMouth = 0.45;
       break;
     }
   }
 
-  const f = Math.min(1, dt * 18);
-  m.mouth += (tMouth - m.mouth) * f;
+  // His mouth moves with his voice.
+  const lvl = voiceLevel();
+  m.talk += (clamp(lvl * 5, 0, 1) - m.talk) * Math.min(1, dt * 25);
+  if (m.state !== 'chew' && m.state !== 'burp') tMouth = Math.max(tMouth, m.talk * 0.75);
+  if (happy && m.talk < 0.05) tMouth = Math.max(tMouth, 0.4);
+
+  m.mouth += (tMouth - m.mouth) * Math.min(1, dt * 20);
   m.sx += (tSx - m.sx) * Math.min(1, dt * 14);
   m.sy += (tSy - m.sy) * Math.min(1, dt * 14);
   m.jump = jump;
@@ -854,14 +976,13 @@ function updateMonster(dt) {
   }
   m.blink = Math.max(0, m.blink - dt);
 
-  // Eyes follow the food being moved, the cake, or the last touch.
   let target = null;
   const moving = tray.find((i) => i.state === 'drag' || i.state === 'fly');
   if (moving) target = moving;
-  else if (cake) target = cakePos();
+  else if (present) target = presentPos();
   else if (lastPointer && time - lastPointer.t < 2.5) target = lastPointer;
-  let lx = 0;
-  let ly = 0.5;
+  let lx;
+  let ly;
   if (target) {
     const dx = target.x - L.mx;
     const dy = target.y - (L.my - R * 0.3);
@@ -875,21 +996,9 @@ function updateMonster(dt) {
   }
   m.lookX += (lx - m.lookX) * Math.min(1, dt * 8);
   m.lookY += (ly - m.lookY) * Math.min(1, dt * 8);
-
-  // Gentle hints when she's been waiting a while.
-  if (mode === 'play' && req && m.state === 'idle' && !drag) {
-    const idle = time - lastActive;
-    for (const it of tray) it.hint = idle > 6 && it.state === 'idle' && matches(it.food, req);
-    if (idle > 9 && time - lastSpoke > 9) {
-      speak(askPhrase(req));
-      bubble.pop = 1;
-    }
-  } else {
-    for (const it of tray) it.hint = false;
-  }
 }
 
-// ---------- drawing ----------
+// ---------- drawing: world ----------
 
 function drawBackground() {
   const sky = ctx.createLinearGradient(0, 0, 0, H);
@@ -899,7 +1008,6 @@ function drawBackground() {
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, W, H);
 
-  // Sun
   const sx = W * 0.86;
   const sy = H * 0.16;
   const sr = Math.min(W, H) * 0.08;
@@ -913,7 +1021,6 @@ function drawBackground() {
   ctx.arc(sx, sy, sr, 0, Math.PI * 2);
   ctx.fill();
 
-  // Clouds
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   for (const c of clouds) {
     const x = c.x * W;
@@ -927,7 +1034,6 @@ function drawBackground() {
     ctx.fill();
   }
 
-  // Hills
   const ground = L.my + R * 1.02;
   ctx.fillStyle = '#e1f4cf';
   ctx.beginPath();
@@ -945,9 +1051,7 @@ function drawBackground() {
   ctx.lineTo(0, H);
   ctx.fill();
 
-  // Little flowers
-  const flowers = [0.08, 0.2, 0.33, 0.7, 0.84, 0.95];
-  flowers.forEach((fx, i) => {
+  [0.08, 0.2, 0.33, 0.7, 0.84, 0.95].forEach((fx, i) => {
     const x = fx * W;
     const y = ground - R * (0.15 + (i % 3) * 0.06);
     const s = R * 0.05;
@@ -976,8 +1080,10 @@ function roundRect(x, y, w, h, r) {
 }
 
 function drawTray() {
+  if (mode === 'sleep' || mode === 'wake') return;
+  const n = L.slots.length;
   const x = L.slots[0] - L.plateR * 1.5;
-  const w = L.slots[SLOTS - 1] - L.slots[0] + L.plateR * 3;
+  const w = L.slots[n - 1] - L.slots[0] + L.plateR * 3;
   const y = L.trayTop + L.trayH * 0.08;
   const h = H - y + 40;
   ctx.save();
@@ -991,25 +1097,29 @@ function drawTray() {
   for (let gy = y; gy < y + h; gy += g * 2) ctx.fillRect(x, gy, w, g);
   ctx.restore();
 
-  for (let i = 0; i < SLOTS; i++) {
+  if (present) return;
+  for (let i = 0; i < n; i++) {
     const px = L.slots[i];
     const py = L.plateY;
     ctx.fillStyle = 'rgba(150,100,120,0.15)';
     ctx.beginPath();
     ctx.ellipse(px, py + L.plateR * 0.12, L.plateR, L.plateR * 0.92, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#ffffff';
+    const pg = ctx.createRadialGradient(px - L.plateR * 0.3, py - L.plateR * 0.4, L.plateR * 0.1, px, py, L.plateR);
+    pg.addColorStop(0, '#ffffff');
+    pg.addColorStop(1, '#f4eef2');
+    ctx.fillStyle = pg;
     ctx.beginPath();
     ctx.arc(px, py, L.plateR, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#f2e6ea';
+    ctx.strokeStyle = '#efe3e8';
     ctx.lineWidth = L.plateR * 0.08;
     ctx.beginPath();
     ctx.arc(px, py, L.plateR * 0.74, 0, Math.PI * 2);
     ctx.stroke();
     const it = tray.find((t) => t.slot === i);
     if (it?.hint) {
-      ctx.strokeStyle = `rgba(255,200,60,${0.5 + 0.4 * Math.sin(time * 8)})`;
+      ctx.strokeStyle = `rgba(255,200,60,${0.55 + 0.4 * Math.sin(time * 8)})`;
       ctx.lineWidth = L.plateR * 0.14;
       ctx.beginPath();
       ctx.arc(px, py, L.plateR * 1.05, 0, Math.PI * 2);
@@ -1019,7 +1129,8 @@ function drawTray() {
 }
 
 function drawFoods(layer) {
-  for (const it of tray) {
+  const items = layer === 'tray' ? [...leaving, ...tray] : tray;
+  for (const it of items) {
     if (!it.food || it.state === 'gone' || it.state === 'wait') continue;
     const top = it.state === 'drag' || it.state === 'fly';
     if ((layer === 'top') !== top) continue;
@@ -1032,34 +1143,94 @@ function drawFoods(layer) {
     if (it.state === 'return' && it.hop) rot = Math.sin(it.t * 20) * 0.3 * Math.max(0, 1 - it.t * 2);
     if (it.state === 'drag') rot = Math.sin(time * 6) * 0.08;
     const size = L.plateR * 1.35 * it.s;
-    const a = top ? 1 : trayShow;
     if (top) {
       ctx.fillStyle = 'rgba(80,60,80,0.12)';
       ctx.beginPath();
       ctx.ellipse(it.x, it.y + size * 0.7, size * 0.4, size * 0.12, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    drawEmoji(it.food.e, it.x, y, size, rot, a);
+    drawEmoji(it.food.e, it.x, y, size, rot);
   }
 }
 
-function drawCake() {
-  if (!cake) return;
-  const p = cakePos();
-  const mp = mouthPos();
-  let x = p.x;
-  let y = p.y;
-  let s = p.size * easeOutBack(cake.pop);
-  if (cake.hop >= 0) {
-    const h = Math.sin(clamp(cake.hop, 0, 1) * Math.PI);
-    x = lerp(p.x, mp.x - p.size * 0.25, h);
-    y = lerp(p.y, mp.y + p.size * 0.2, h);
-    s *= 1 - 0.2 * h;
-  } else if (cake.bites < BITES) {
-    s *= 1 + Math.sin(time * 5) * 0.03;
+function drawPresent() {
+  if (!present) return;
+  const p = presentPos();
+  const appear = easeOutBack(clamp(present.t / 0.5, 0, 1));
+  if (present.open < 0) {
+    const bounce = Math.abs(Math.sin(present.t * 3.5)) * p.size * 0.08;
+    const wob = Math.sin(present.t * 7) * 0.06;
+    drawEmoji('🎁', p.x, p.y - bounce, p.size * appear, wob);
+    const ring = (present.t * 1.2) % 1;
+    ctx.strokeStyle = `rgba(255,210,80,${0.6 * (1 - ring)})`;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * (0.5 + ring * 0.4), 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (present.open < 0.45) {
+    const sh = Math.sin(present.open * 60) * 0.25;
+    drawEmoji('🎁', p.x, p.y, p.size * (1 + present.open * 0.4), sh);
   }
-  ctx.drawImage(cake.canvas, x - s / 2, y - s / 2, s, s);
 }
+
+function prizeWorld(i) {
+  const s = PRIZE_SPOTS[i];
+  if (s) return { x: L.mx + s.x * R, y: L.my + s.y * R, size: s.s * R };
+  if (i === 3) return { ...butterflyPos(), size: R * 0.34 };
+  return { x: L.mx + R * 1.3, y: L.my - R * 1.25, size: R * 0.55 };
+}
+
+function butterflyPos() {
+  const a = time * 0.9;
+  return { x: L.mx + Math.cos(a) * R * 1.45, y: L.my - R * 0.55 + Math.sin(a * 2) * R * 0.3 };
+}
+
+function drawFlyingPrize() {
+  if (!flyingPrize) return;
+  const p = presentPos();
+  const k = clamp((flyingPrize.t - 0.2) / 0.9, 0, 1);
+  const to = prizeWorld(flyingPrize.index);
+  const e = k * k * (3 - 2 * k);
+  const x = lerp(p.x, to.x, e);
+  const y = lerp(p.y, to.y, e) - Math.sin(k * Math.PI) * R * 0.9;
+  const size = lerp(p.size * 0.7, to.size, e) * (k < 1 ? 1 + 0.15 * Math.sin(flyingPrize.t * 12) : 1);
+  if (k < 1) {
+    ctx.fillStyle = 'rgba(255,240,170,0.5)';
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.9, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  drawEmoji(flyingPrize.e, x, y, size, k < 1 ? Math.sin(k * 12) * 0.3 : 0);
+}
+
+function drawWornPrizes(where) {
+  const owned = flyingPrize ? flyingPrize.index : prizes;
+  for (let i = 0; i < owned && i < PRIZES.length; i++) {
+    const s = PRIZE_SPOTS[i];
+    if (where === 'body' && s) {
+      drawEmoji(PRIZES[i].e, s.x * R, s.y * R, s.s * R, s.r);
+    } else if (where === 'world' && i === 3) {
+      const b = butterflyPos();
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.scale(0.55 + 0.45 * Math.abs(Math.sin(time * 9)), 1);
+      drawEmoji(PRIZES[i].e, 0, 0, R * 0.34);
+      ctx.restore();
+    } else if (where === 'world' && i === 4) {
+      const bx = L.mx + R * 1.3 + Math.sin(time * 1.4) * R * 0.08;
+      const by = L.my - R * 1.25 + Math.sin(time * 2) * R * 0.05;
+      ctx.strokeStyle = 'rgba(120,100,130,0.6)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(L.mx + R * 0.98 + m.shake, L.my + R * 0.42 - m.jump);
+      ctx.quadraticCurveTo(bx + R * 0.1, by + R * 0.7, bx, by + R * 0.3);
+      ctx.stroke();
+      drawEmoji(PRIZES[i].e, bx, by, R * 0.55, Math.sin(time * 1.4) * 0.08);
+    }
+  }
+}
+
+// ---------- drawing: thought bubble ----------
 
 function drawBubble() {
   if (bubble.s < 0.02 || !bubble.content) return;
@@ -1072,10 +1243,7 @@ function drawBubble() {
   ctx.shadowColor = 'rgba(120,90,130,0.25)';
   ctx.shadowBlur = 14;
   ctx.shadowOffsetY = 4;
-  for (const [t, r] of [
-    [0.25, 0.1],
-    [0.5, 0.15],
-  ]) {
+  for (const [t, r] of [[0.25, 0.1], [0.5, 0.15]]) {
     ctx.beginPath();
     ctx.arc(lerp(hx, L.bx, t), lerp(hy, L.by, t), L.br * r * s, 0, Math.PI * 2);
     ctx.fill();
@@ -1090,36 +1258,72 @@ function drawBubble() {
     ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r * 0.92);
   }
   ctx.fill();
-  ctx.restore();
-
-  ctx.save();
-  ctx.translate(L.bx, L.by);
-  ctx.rotate(wiggle);
-  ctx.scale(s, s);
-  const c = bubble.content;
-  if (c.type === 'food') drawEmoji(c.food.e, 0, 0, L.br * 1.15);
-  else if (c.type === 'cake') drawEmoji('🎂', 0, 0, L.br * 1.15);
-  else splat(0, 0, L.br * 0.62, COLORS[c.color]);
+  ctx.shadowColor = 'transparent';
+  drawClue(bubble.content, L.br);
   ctx.restore();
 }
 
+// Draws the clue picture centered at 0,0 inside a bubble of radius r.
+function drawClue(c, r) {
+  switch (c.type) {
+    case 'present':
+      return drawEmoji('🎁', 0, 0, r * 1.15);
+    case 'color':
+      return splat(0, 0, r * 0.6, COLORS[c.color]);
+    case 'shape':
+      return shapeIcon(c.shape, 0, 0, r * 0.62, '#b7aee0');
+    case 'kind':
+      return drawEmoji(KINDS[c.kind].icon, 0, 0, r * 1.1);
+    case 'cs':
+      return shapeIcon(c.shape, 0, 0, r * 0.62, COLORS[c.color]);
+    case 'ck':
+      splat(-r * 0.32, r * 0.05, r * 0.36, COLORS[c.color]);
+      return drawEmoji(KINDS[c.kind].icon, r * 0.33, 0, r * 0.75);
+    case 'riddle':
+      drawEmoji(RIDDLES[c.riddle].icon, 0, -r * 0.05, r * 1.0);
+      ctx.font = `700 ${r * 0.42}px ${UI_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#9b7bff';
+      ctx.fillText('?', r * 0.62, -r * 0.5);
+      return;
+    case 'two': {
+      const sub = { ...c, type: c.base };
+      for (const dx of [-0.42, 0.42]) {
+        ctx.save();
+        ctx.translate(dx * r, 0);
+        ctx.scale(0.55, 0.55);
+        drawClue(sub, r);
+        ctx.restore();
+      }
+      return;
+    }
+  }
+}
+
 function splat(x, y, r, color) {
-  ctx.fillStyle = color;
+  const white = color === '#ffffff';
+  const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r * 1.2);
+  g.addColorStop(0, white ? '#ffffff' : mix(color, '#ffffff', 0.35));
+  g.addColorStop(0.55, white ? '#f3f1f8' : color);
+  g.addColorStop(1, white ? '#cfc8de' : mix(color, '#3a2050', 0.25));
+  ctx.fillStyle = g;
+  ctx.strokeStyle = white ? '#a99fc2' : mix(color, '#3a2050', 0.2);
+  ctx.lineWidth = r * (white ? 0.1 : 0.05);
   ctx.beginPath();
   for (let i = 0; i <= 60; i++) {
     const a = (i / 60) * Math.PI * 2;
     const rr = r * (1 + 0.13 * Math.sin(a * 7 + 1) + 0.06 * Math.sin(a * 3));
     ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
   }
+  ctx.closePath();
   ctx.fill();
-  for (const [dx, dy, dr] of [
-    [1.25, -0.6, 0.16],
-    [-1.2, 0.75, 0.12],
-    [0.9, 1.05, 0.1],
-  ]) {
+  ctx.stroke();
+  for (const [dx, dy, dr] of [[1.25, -0.6, 0.16], [-1.2, 0.75, 0.12], [0.9, 1.05, 0.1]]) {
     ctx.beginPath();
     ctx.arc(x + dx * r, y + dy * r, dr * r, 0, Math.PI * 2);
     ctx.fill();
+    ctx.stroke();
   }
   ctx.fillStyle = 'rgba(255,255,255,0.45)';
   ctx.beginPath();
@@ -1127,15 +1331,48 @@ function splat(x, y, r, color) {
   ctx.fill();
 }
 
+function shapeIcon(shape, x, y, r, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.beginPath();
+  if (shape === 'round') {
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+  } else if (shape === 'long') {
+    ctx.rotate(-0.6);
+    roundRect(-r * 1.25, -r * 0.38, r * 2.5, r * 0.76, r * 0.38);
+  } else {
+    ctx.lineJoin = 'round';
+    ctx.moveTo(0, -r * 0.95);
+    ctx.lineTo(r * 1.0, r * 0.75);
+    ctx.lineTo(-r * 1.0, r * 0.75);
+    ctx.closePath();
+  }
+  const g = ctx.createRadialGradient(-r * 0.4, -r * 0.45, r * 0.1, 0, 0, r * 1.3);
+  g.addColorStop(0, mix(color, '#ffffff', 0.5));
+  g.addColorStop(0.5, color);
+  g.addColorStop(1, mix(color, '#3a2050', 0.3));
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.strokeStyle = mix(color, '#3a2050', 0.25);
+  ctx.lineWidth = r * 0.1;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function meterX(i) {
+  const gap = L.meterR * 2.5;
+  return W / 2 - ((TUMMY - 1) * gap) / 2 + i * gap;
+}
+
 function drawMeter() {
   if (mode === 'sleep' || mode === 'wake') return;
   const r = L.meterR;
   const gap = r * 2.5;
-  const x0 = W / 2 - ((TUMMY - 1) * gap) / 2;
-  L.meterX = (i) => x0 + i * gap;
+  const x0 = meterX(0);
   ctx.save();
   roundRect(x0 - r * 1.5, L.meterY - r * 1.3, (TUMMY - 1) * gap + r * 3, r * 2.6, r * 1.3);
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fillStyle = 'rgba(255,255,255,0.72)';
   ctx.fill();
   for (let i = 0; i < TUMMY; i++) {
     const x = x0 + i * gap;
@@ -1144,12 +1381,35 @@ function drawMeter() {
       const k = clamp((time - t.born) / 0.4, 0, 1);
       drawEmoji(t.food.e, x, L.meterY, r * 1.7 * easeOutBack(k));
     } else {
-      ctx.fillStyle = 'rgba(180,220,170,0.55)';
+      ctx.fillStyle = 'rgba(200,190,230,0.55)';
       ctx.beginPath();
       ctx.arc(x, L.meterY, r * 0.75, 0, Math.PI * 2);
       ctx.fill();
     }
   }
+  // Level stars under the tummy meter
+  const stars = Math.min(level, 10);
+  const ss = r * 0.62;
+  for (let i = 0; i < stars; i++) {
+    drawEmoji('⭐', W / 2 + (i - (stars - 1) / 2) * ss * 1.15, L.meterY + r * 1.3 + ss * 0.75, ss);
+  }
+  ctx.restore();
+}
+
+// ---------- drawing: the monster ----------
+
+function shadedEllipse(x, y, rx, ry, color, rot = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  const g = ctx.createRadialGradient(-rx * 0.35, -ry * 0.4, Math.min(rx, ry) * 0.05, 0, 0, Math.max(rx, ry) * 1.05);
+  g.addColorStop(0, mix(color, '#ffffff', 0.55));
+  g.addColorStop(0.45, color);
+  g.addColorStop(1, mix(color, '#2a1640', 0.35));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
@@ -1158,10 +1418,12 @@ function drawMonster() {
   const rx = R * 0.95 * (1 + 0.12 * full);
   const ry = R;
 
-  // Ground shadow
-  ctx.fillStyle = 'rgba(70,110,60,0.18)';
+  const sg = ctx.createRadialGradient(L.mx, L.my + R * 1.06, 0, L.mx, L.my + R * 1.06, rx * 1.1);
+  sg.addColorStop(0, 'rgba(60,90,60,0.32)');
+  sg.addColorStop(1, 'rgba(60,90,60,0)');
+  ctx.fillStyle = sg;
   ctx.beginPath();
-  ctx.ellipse(L.mx, L.my + R * 1.06, rx * (1 - (m.jump / R) * 0.6), R * 0.14, 0, 0, Math.PI * 2);
+  ctx.ellipse(L.mx, L.my + R * 1.06, rx * 1.1 * (1 - (m.jump / R) * 0.6), R * 0.18, 0, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.save();
@@ -1172,46 +1434,70 @@ function drawMonster() {
 
   drawTail(rx);
 
-  // Spikes along the top of his head
-  for (const a of [-2.08, -1.84, -1.57, -1.3, -1.06]) {
-    const big = a === -1.57;
-    drawSpike(rx, ry, a, (big ? 0.36 : 0.27) * R, 0.13 * R);
-  }
-  // Horns
-  drawHorn(rx, ry, -2.3, -1);
-  drawHorn(rx, ry, -0.84, 1);
+  const spikes = [-1.92, -1.75, -1.57, -1.39, -1.22];
+  spikes.forEach((a, i) => drawSpike(rx, ry, a, (i === 2 ? 0.36 : 0.28) * R, 0.12 * R, RAINBOW[i]));
+  drawHorn(rx, ry, -2.2, -1);
+  drawHorn(rx, ry, -0.94, 1);
 
-  // Body
-  const grad = ctx.createRadialGradient(-rx * 0.3, -ry * 0.45, R * 0.1, 0, 0, R * 1.25);
-  grad.addColorStop(0, C.bodyLight);
-  grad.addColorStop(0.55, C.body);
-  grad.addColorStop(1, C.bodyDark);
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Belly grows as he eats
-  ctx.fillStyle = C.belly;
-  ctx.beginPath();
-  ctx.ellipse(0, R * 0.52, R * 0.55 * (1 + 0.3 * full), R * 0.4 * (1 + 0.15 * full), 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Feet
+  // Feet behind the body so they tuck under
   for (const side of [-1, 1]) {
     const fx = side * R * 0.45;
     const fy = R * 0.95;
-    ctx.fillStyle = C.bodyDark;
-    ctx.beginPath();
-    ctx.ellipse(fx, fy, R * 0.26, R * 0.15, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = C.horn;
+    shadedEllipse(fx, fy, R * 0.27, R * 0.16, bodyColorAt(0.97));
+    ctx.fillStyle = '#fff7e0';
     for (let t = -1; t <= 1; t++) {
       ctx.beginPath();
-      ctx.arc(fx + t * R * 0.1, fy + R * 0.08, R * 0.035, 0, Math.PI * 2);
+      ctx.arc(fx + t * R * 0.1, fy + R * 0.09, R * 0.036, 0, Math.PI * 2);
       ctx.fill();
     }
   }
+
+  // Rainbow body
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+  const band = ctx.createLinearGradient(0, -ry, 0, ry);
+  RAINBOW.forEach((c, i) => band.addColorStop(i / (RAINBOW.length - 1), c));
+  ctx.fillStyle = band;
+  ctx.fill();
+  ctx.clip();
+  const shade = ctx.createRadialGradient(-rx * 0.32, -ry * 0.38, 0, -rx * 0.1, -ry * 0.1, R * 1.35);
+  shade.addColorStop(0, 'rgba(255,255,255,0.55)');
+  shade.addColorStop(0.3, 'rgba(255,255,255,0.15)');
+  shade.addColorStop(0.62, 'rgba(255,255,255,0)');
+  shade.addColorStop(1, 'rgba(40,10,70,0.42)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(-rx * 1.2, -ry * 1.2, rx * 2.4, ry * 2.4);
+  // Bounce light from the grass along the bottom edge
+  const bounce = ctx.createLinearGradient(0, ry * 0.55, 0, ry);
+  bounce.addColorStop(0, 'rgba(200,255,200,0)');
+  bounce.addColorStop(1, 'rgba(200,255,200,0.22)');
+  ctx.fillStyle = bounce;
+  ctx.fillRect(-rx, ry * 0.55, rx * 2, ry * 0.5);
+  ctx.restore();
+
+  // Glossy highlight
+  const hl = ctx.createRadialGradient(-rx * 0.45, -ry * 0.58, 0, -rx * 0.45, -ry * 0.58, R * 0.26);
+  hl.addColorStop(0, 'rgba(255,255,255,0.85)');
+  hl.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = hl;
+  ctx.beginPath();
+  ctx.ellipse(-rx * 0.45, -ry * 0.58, R * 0.26, R * 0.16, -0.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Pearly belly that grows as he eats
+  const bx = 0;
+  const by = R * 0.52;
+  const brx = R * 0.55 * (1 + 0.3 * full);
+  const bry = R * 0.4 * (1 + 0.15 * full);
+  const bg = ctx.createRadialGradient(bx - brx * 0.3, by - bry * 0.4, 0, bx, by, Math.max(brx, bry) * 1.05);
+  bg.addColorStop(0, 'rgba(255,255,255,0.95)');
+  bg.addColorStop(0.6, 'rgba(255,250,255,0.7)');
+  bg.addColorStop(1, 'rgba(255,240,255,0.25)');
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.ellipse(bx, by, brx, bry, 0, 0, Math.PI * 2);
+  ctx.fill();
 
   // Arms
   for (const side of [-1, 1]) {
@@ -1219,33 +1505,36 @@ function drawMonster() {
     ctx.translate(side * rx * 0.93, R * 0.28);
     const wave = m.arm > 0.6 ? Math.sin(time * 14 + side) * 0.25 : 0;
     ctx.rotate(-side * (0.45 + m.arm * 2.0 + wave));
-    ctx.fillStyle = C.bodyDark;
-    ctx.beginPath();
-    ctx.ellipse(0, R * 0.2, R * 0.12, R * 0.26, 0, 0, Math.PI * 2);
-    ctx.fill();
+    shadedEllipse(0, R * 0.2, R * 0.13, R * 0.27, bodyColorAt(0.66));
     ctx.restore();
   }
 
   drawCheeks();
   drawEyes();
   drawMouth();
+  drawWornPrizes('body');
 
   ctx.restore();
 }
 
-function drawSpike(rx, ry, a, len, w) {
-  const px = rx * Math.cos(a);
-  const py = ry * Math.sin(a);
+function normalAt(rx, ry, a) {
   let nx = Math.cos(a) / rx;
   let ny = Math.sin(a) / ry;
   const nl = Math.hypot(nx, ny);
-  nx /= nl;
-  ny /= nl;
+  return [nx / nl, ny / nl];
+}
+
+function drawSpike(rx, ry, a, len, w, color) {
+  const [nx, ny] = normalAt(rx, ry, a);
   ctx.save();
-  ctx.translate(px - nx * R * 0.08, py - ny * R * 0.08);
+  ctx.translate(rx * Math.cos(a) - nx * R * 0.08, ry * Math.sin(a) - ny * R * 0.08);
   ctx.rotate(Math.atan2(ny, nx) + Math.PI / 2);
-  ctx.fillStyle = C.spike;
-  ctx.strokeStyle = C.spike;
+  const g = ctx.createLinearGradient(-w, 0, w, 0);
+  g.addColorStop(0, mix(color, '#ffffff', 0.45));
+  g.addColorStop(0.5, color);
+  g.addColorStop(1, mix(color, '#2a1640', 0.3));
+  ctx.fillStyle = g;
+  ctx.strokeStyle = g;
   ctx.lineWidth = R * 0.06;
   ctx.lineJoin = 'round';
   ctx.beginPath();
@@ -1259,28 +1548,35 @@ function drawSpike(rx, ry, a, len, w) {
 }
 
 function drawHorn(rx, ry, a, side) {
-  const px = rx * Math.cos(a);
-  const py = ry * Math.sin(a);
-  let nx = Math.cos(a) / rx;
-  let ny = Math.sin(a) / ry;
-  const nl = Math.hypot(nx, ny);
-  nx /= nl;
-  ny /= nl;
-  const len = R * 0.44;
-  const w = R * 0.12;
+  const [nx, ny] = normalAt(rx, ry, a);
+  const len = R * 0.58;
+  const w = R * 0.15;
   ctx.save();
-  ctx.translate(px - nx * R * 0.06, py - ny * R * 0.06);
-  ctx.rotate(Math.atan2(ny, nx) + Math.PI / 2);
+  ctx.translate(rx * Math.cos(a) - nx * R * 0.04, ry * Math.sin(a) - ny * R * 0.04);
+  ctx.rotate(Math.atan2(ny, nx) + Math.PI / 2 - side * 0.3);
   ctx.scale(side, 1);
-  ctx.fillStyle = C.horn;
-  ctx.strokeStyle = C.hornEdge;
-  ctx.lineWidth = R * 0.03;
   ctx.beginPath();
   ctx.moveTo(-w, R * 0.05);
   ctx.quadraticCurveTo(-w * 0.4, -len * 0.55, R * 0.17, -len);
   ctx.quadraticCurveTo(w * 1.2, -len * 0.5, w, R * 0.05);
   ctx.closePath();
+  // Rainbow stripes from base to tip
+  const stripes = ctx.createLinearGradient(0, R * 0.05, R * 0.1, -len);
+  const cols = [...RAINBOW].reverse();
+  cols.forEach((c, i) => {
+    stripes.addColorStop(i / cols.length, c);
+    stripes.addColorStop((i + 1) / cols.length - 0.001, c);
+  });
+  ctx.fillStyle = stripes;
   ctx.fill();
+  const roundness = ctx.createLinearGradient(-w, 0, w, 0);
+  roundness.addColorStop(0, 'rgba(255,255,255,0.5)');
+  roundness.addColorStop(0.45, 'rgba(255,255,255,0)');
+  roundness.addColorStop(1, 'rgba(40,10,70,0.3)');
+  ctx.fillStyle = roundness;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = R * 0.02;
   ctx.stroke();
   ctx.restore();
 }
@@ -1302,16 +1598,16 @@ function drawTail(rx) {
   }
   for (let i = N - 1; i >= 0; i--) {
     const p = pts[i];
-    ctx.fillStyle = p.c;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    ctx.fill();
+    shadedEllipse(p.x, p.y, p.r, p.r, p.c);
   }
   const tip = pts[N - 1];
   ctx.save();
   ctx.translate(tip.x + Math.cos(ang) * R * 0.08, tip.y + Math.sin(ang) * R * 0.08);
   ctx.rotate(ang + Math.PI / 2);
-  ctx.fillStyle = '#ff8fb8';
+  const hg = ctx.createRadialGradient(-R * 0.05, -R * 0.08, 0, 0, 0, R * 0.2);
+  hg.addColorStop(0, '#ffd1e3');
+  hg.addColorStop(1, '#ff6fa5');
+  ctx.fillStyle = hg;
   heartPath(R * 0.26);
   ctx.fill();
   ctx.restore();
@@ -1329,14 +1625,22 @@ function drawCheeks() {
     ctx.save();
     ctx.translate(side * R * 0.62, R * 0.08);
     ctx.scale(s, s);
-    ctx.fillStyle = 'rgba(255,140,170,0.35)';
+    const bl = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.2);
+    bl.addColorStop(0, 'rgba(255,120,170,0.55)');
+    bl.addColorStop(1, 'rgba(255,120,170,0)');
+    ctx.fillStyle = bl;
     ctx.beginPath();
-    ctx.ellipse(0, 0, R * 0.17, R * 0.12, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, R * 0.2, R * 0.15, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    ctx.lineWidth = R * 0.17;
+    ctx.beginPath();
+    ctx.arc(0, R * 0.06, R * 0.094, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.stroke();
     ctx.lineWidth = R * 0.03;
     for (let k = 0; k < 5; k++) {
-      ctx.strokeStyle = RAINBOW[k];
+      ctx.strokeStyle = RAINBOW[k === 4 ? 5 : k];
       ctx.beginPath();
       ctx.arc(0, R * 0.06, R * (0.15 - k * 0.028), Math.PI * 1.05, Math.PI * 1.95);
       ctx.stroke();
@@ -1354,7 +1658,7 @@ function drawEyes() {
     const er = R * 0.23;
     ctx.lineCap = 'round';
     if (asleep || m.happy > 0.5) {
-      ctx.strokeStyle = C.eye;
+      ctx.strokeStyle = '#3a2450';
       ctx.lineWidth = R * 0.06;
       ctx.beginPath();
       if (asleep) ctx.arc(ex, ey, er * 0.6, 0.15 * Math.PI, 0.85 * Math.PI);
@@ -1362,27 +1666,56 @@ function drawEyes() {
       ctx.stroke();
       continue;
     }
-    ctx.fillStyle = '#ffffff';
+    // Socket shadow for depth
+    ctx.fillStyle = 'rgba(60,20,70,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(ex, ey + er * 0.08, er * 1.08, er * 1.08 * open, 0, 0, Math.PI * 2);
+    ctx.fill();
+    const sc = ctx.createRadialGradient(ex - er * 0.3, ey - er * 0.35, er * 0.1, ex, ey, er);
+    sc.addColorStop(0, '#ffffff');
+    sc.addColorStop(0.75, '#f6f4fb');
+    sc.addColorStop(1, '#d9d3e8');
+    ctx.fillStyle = sc;
     ctx.beginPath();
     ctx.ellipse(ex, ey, er, er * open, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(45,42,62,0.25)';
-    ctx.lineWidth = R * 0.02;
-    ctx.stroke();
     if (open < 0.5) continue;
-    const px = ex + m.lookX * R * 0.09;
-    const py = ey + m.lookY * R * 0.08;
-    ctx.fillStyle = C.eye;
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(px, py, R * 0.125, 0, Math.PI * 2);
+    ctx.ellipse(ex, ey, er, er, 0, 0, Math.PI * 2);
+    ctx.clip();
+    const px = ex + m.lookX * R * 0.08;
+    const py = ey + m.lookY * R * 0.07;
+    const ir = R * 0.145;
+    const iris = ctx.createRadialGradient(px - ir * 0.25, py - ir * 0.3, ir * 0.1, px, py, ir);
+    iris.addColorStop(0, '#c4ff8f');
+    iris.addColorStop(0.45, '#4fd256');
+    iris.addColorStop(1, '#1d7a33');
+    ctx.fillStyle = iris;
+    ctx.beginPath();
+    ctx.arc(px, py, ir, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#155c26';
+    ctx.lineWidth = R * 0.014;
+    ctx.stroke();
+    ctx.fillStyle = '#14121c';
+    ctx.beginPath();
+    ctx.arc(px, py, ir * 0.48, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(px - R * 0.04, py - R * 0.045, R * 0.045, 0, Math.PI * 2);
+    ctx.arc(px - ir * 0.38, py - ir * 0.4, ir * 0.3, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.arc(px + R * 0.04, py + R * 0.04, R * 0.018, 0, Math.PI * 2);
+    ctx.arc(px + ir * 0.35, py + ir * 0.35, ir * 0.13, 0, Math.PI * 2);
     ctx.fill();
+    // Upper lid shade
+    const lid = ctx.createLinearGradient(0, ey - er, 0, ey - er * 0.3);
+    lid.addColorStop(0, 'rgba(70,30,90,0.25)');
+    lid.addColorStop(1, 'rgba(70,30,90,0)');
+    ctx.fillStyle = lid;
+    ctx.fillRect(ex - er, ey - er, er * 2, er * 0.7);
+    ctx.restore();
   }
 }
 
@@ -1393,8 +1726,9 @@ function drawMouth() {
   ctx.translate(0, R * 0.16);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  if (m.state === 'no') {
-    ctx.strokeStyle = C.mouth;
+  const lip = '#5b2342';
+  if (m.state === 'no' && o < 0.2) {
+    ctx.strokeStyle = lip;
     ctx.lineWidth = R * 0.05;
     ctx.beginPath();
     for (let i = 0; i <= 16; i++) {
@@ -1403,7 +1737,7 @@ function drawMouth() {
     }
     ctx.stroke();
   } else if (o < 0.05) {
-    ctx.strokeStyle = C.mouth;
+    ctx.strokeStyle = lip;
     ctx.lineWidth = R * 0.05;
     ctx.beginPath();
     ctx.moveTo(-w * 0.8, 0);
@@ -1423,11 +1757,17 @@ function drawMouth() {
     ctx.quadraticCurveTo(0, -R * 0.04, w, 0);
     ctx.bezierCurveTo(w, h * 1.3, -w, h * 1.3, -w, 0);
     ctx.closePath();
-    ctx.fillStyle = C.mouth;
+    const mg = ctx.createRadialGradient(0, h * 0.4, 0, 0, h * 0.4, w * 1.1);
+    mg.addColorStop(0, '#2c0c22');
+    mg.addColorStop(1, '#6b2a4e');
+    ctx.fillStyle = mg;
     ctx.fill();
     ctx.save();
     ctx.clip();
-    ctx.fillStyle = C.tongue;
+    const tg = ctx.createRadialGradient(-w * 0.15, h * 0.8, 0, 0, h * 0.95, w * 0.7);
+    tg.addColorStop(0, '#ffb3c8');
+    tg.addColorStop(1, '#ff6f96');
+    ctx.fillStyle = tg;
     ctx.beginPath();
     ctx.ellipse(0, h * 0.95, w * 0.6, h * 0.42 + R * 0.02, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -1465,9 +1805,11 @@ function drawTitle() {
   const bx = W / 2;
   const by = L.plateY;
   const br = Math.min(L.trayH * 0.32, 60) * (1 + Math.sin(time * 4) * 0.05);
-  ctx.shadowColor = 'rgba(60,140,70,0.4)';
+  ctx.shadowColor = 'rgba(120,80,160,0.4)';
   ctx.shadowBlur = 16;
-  ctx.fillStyle = C.body;
+  const pg = ctx.createLinearGradient(bx, by - br, bx, by + br);
+  RAINBOW.forEach((c, i) => pg.addColorStop(i / (RAINBOW.length - 1), c));
+  ctx.fillStyle = pg;
   ctx.beginPath();
   ctx.arc(bx, by, br, 0, Math.PI * 2);
   ctx.fill();
@@ -1488,22 +1830,20 @@ function drawTitle() {
 function draw() {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   drawBackground();
-  if (mode !== 'sleep') drawTray();
+  drawTray();
   drawFoods('tray');
   drawMeter();
   drawMonster();
-  drawCake();
+  drawWornPrizes('world');
+  drawPresent();
   drawBubble();
   drawFoods('top');
+  drawFlyingPrize();
   drawParticles();
   drawTitle();
 }
 
 // ---------- input ----------
-
-function pointFrom(e) {
-  return { x: e.clientX, y: e.clientY };
-}
 
 function itemAt(p) {
   let best = null;
@@ -1532,37 +1872,36 @@ function hitBody(p) {
 function wake() {
   mode = 'wake';
   setState('wake', 1.4);
-  sfx.yawn();
-  speak("Yawn! I'm so hungry!");
-  after(1.5, () => {
+  preload(['wake', 'yum', 'no', 'tickle', 'tail', 'hint', 'onemore', 'burp', 'present', 'waiting']);
+  preloadLevel();
+  say('wake', () => {
     mode = 'play';
-    fillTray();
-    after(1.0, nextRequest);
+    after(0.2, newRound);
   });
 }
 
-function tickle() {
+function tickle(p) {
   setState('giggle', 0.9);
-  sfx.giggle();
-  if (Math.random() < 0.4) speak(pick(['Hee hee! That tickles!', 'Hee hee hee!', 'Tickle tickle!']));
-  for (let i = 0; i < 6; i++) burst('heart', lastPointer.x, lastPointer.y, pick(['#ff7fa8', '#ffb3d1']));
+  say('tickle', () => after(0.4, () => req && m.state === 'idle' && askAgain()));
+  for (let i = 0; i < 6; i++) burst('heart', p.x, p.y, pick(['#ff7fa8', '#ffb3d1']));
 }
 
 function wagTail() {
   m.wag = 4;
   sfx.boing();
   for (const t of tailPts) if (Math.random() < 0.5) burst('spark', t.x, t.y, pick(RAINBOW));
+  if (!voiceSrc && Math.random() < 0.6) say('tail', () => after(0.4, () => req && m.state === 'idle' && askAgain()));
 }
 
 canvas.addEventListener('pointerdown', (e) => {
-  const p = pointFrom(e);
+  const p = { x: e.clientX, y: e.clientY };
   lastPointer = { ...p, t: time };
   lastActive = time;
   audio();
   if (mode === 'sleep') return wake();
   if (mode === 'wake') return;
   if (hitTail(p)) return wagTail();
-  if (mode === 'cake') return biteCake();
+  if (mode === 'present') return openPresent();
   if (mode !== 'play') return;
   const it = itemAt(p);
   if (it) {
@@ -1579,12 +1918,12 @@ canvas.addEventListener('pointerdown', (e) => {
     sfx.pick();
     return;
   }
-  if (hitBody(p) && m.state === 'idle') tickle();
+  if (hitBody(p) && m.state === 'idle' && !voiceSrc) tickle(p);
 });
 
 canvas.addEventListener('pointermove', (e) => {
-  const p = pointFrom(e);
   if (!drag || drag.id !== e.pointerId) return;
+  const p = { x: e.clientX, y: e.clientY };
   lastPointer = { ...p, t: time };
   lastActive = time;
   drag.item.x = p.x + drag.ox;
@@ -1615,14 +1954,13 @@ canvas.addEventListener('pointercancel', endDrag);
 muteBtn.addEventListener('click', () => {
   muted = !muted;
   muteBtn.textContent = muted ? '🔇' : '🔊';
-  if (muted && window.speechSynthesis) speechSynthesis.cancel();
+  if (master) master.gain.value = muted ? 0 : 0.6;
 });
 
 // ---------- loop ----------
 
 window.addEventListener('resize', layout);
 layout();
-L.meterX = () => W / 2;
 
 let last = performance.now();
 function frame(now) {
@@ -1633,3 +1971,12 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+// Lets a silent automated check jump around the game; never used during play.
+window.__monster = {
+  get state() {
+    return { mode, level, req, tray, tummy, prizes, m };
+  },
+  mouthPos,
+  setLevel: (lv) => (level = lv),
+};
